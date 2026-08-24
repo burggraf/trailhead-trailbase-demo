@@ -1,11 +1,84 @@
-# Auto-generated config.Config textproto
+# Trailhead local development configuration.
 email {}
 server {
-  application_name: "TrailBase"
+  application_name: "Trailhead"
+  site_url: "http://localhost:4000"
   logs_retention_sec: 604800
 }
 auth {
   auth_token_ttl_sec: 3600
   refresh_token_ttl_sec: 2592000
+  enable_anonymous_signin: true
 }
 jobs {}
+record_apis: [
+  {
+    name: "profiles"
+    table_name: "profiles"
+    conflict_resolution: REPLACE
+    acl_authenticated: [CREATE, READ, UPDATE, DELETE]
+    create_access_rule: "_REQ_.user = _USER_.id"
+    read_access_rule: "_ROW_.user = _USER_.id OR EXISTS(SELECT 1 FROM trip_members me JOIN trip_members them ON them.trip_id = me.trip_id WHERE me.user_id = _USER_.id AND them.user_id = _ROW_.user)"
+    update_access_rule: "_ROW_.user = _USER_.id AND 'user' NOT IN _REQ_FIELDS_"
+    delete_access_rule: "_ROW_.user = _USER_.id"
+  },
+  {
+    name: "trips"
+    table_name: "trips"
+    acl_authenticated: [READ, UPDATE, DELETE]
+    read_access_rule: "EXISTS(SELECT 1 FROM trip_members WHERE trip_id = _ROW_.id AND user_id = _USER_.id)"
+    update_access_rule: "'owner' NOT IN _REQ_FIELDS_ AND EXISTS(SELECT 1 FROM trip_members WHERE trip_id = _ROW_.id AND user_id = _USER_.id AND role IN ('owner', 'editor'))"
+    delete_access_rule: "EXISTS(SELECT 1 FROM trip_members WHERE trip_id = _ROW_.id AND user_id = _USER_.id AND role = 'owner')"
+  },
+  {
+    name: "trip_members"
+    table_name: "trip_members"
+    acl_authenticated: [READ, UPDATE, DELETE]
+    enable_subscriptions: true
+    read_access_rule: "EXISTS(SELECT 1 FROM trip_members me WHERE me.trip_id = _ROW_.trip_id AND me.user_id = _USER_.id)"
+    update_access_rule: "_ROW_.role != 'owner' AND 'trip_id' NOT IN _REQ_FIELDS_ AND 'user_id' NOT IN _REQ_FIELDS_ AND EXISTS(SELECT 1 FROM trip_members me WHERE me.trip_id = _ROW_.trip_id AND me.user_id = _USER_.id AND me.role = 'owner')"
+    delete_access_rule: "_ROW_.role != 'owner' AND EXISTS(SELECT 1 FROM trip_members me WHERE me.trip_id = _ROW_.trip_id AND me.user_id = _USER_.id AND me.role = 'owner')"
+  },
+  {
+    name: "trip_members_view"
+    table_name: "trip_members_view"
+    acl_authenticated: [READ]
+    enable_subscriptions: true
+    read_access_rule: "EXISTS(SELECT 1 FROM trip_members me WHERE me.trip_id = _ROW_.trip_id AND me.user_id = _USER_.id)"
+  },
+  {
+    name: "itinerary_items"
+    table_name: "itinerary_items"
+    acl_authenticated: [CREATE, READ, UPDATE, DELETE]
+    enable_subscriptions: true
+    create_access_rule: "_REQ_.created_by = _USER_.id AND EXISTS(SELECT 1 FROM trip_members WHERE trip_id = _REQ_.trip_id AND user_id = _USER_.id AND role IN ('owner', 'editor'))"
+    read_access_rule: "EXISTS(SELECT 1 FROM trip_members WHERE trip_id = _ROW_.trip_id AND user_id = _USER_.id)"
+    update_access_rule: "'trip_id' NOT IN _REQ_FIELDS_ AND 'created_by' NOT IN _REQ_FIELDS_ AND EXISTS(SELECT 1 FROM trip_members WHERE trip_id = _ROW_.trip_id AND user_id = _USER_.id AND role IN ('owner', 'editor'))"
+    delete_access_rule: "EXISTS(SELECT 1 FROM trip_members WHERE trip_id = _ROW_.trip_id AND user_id = _USER_.id AND role IN ('owner', 'editor'))"
+  },
+  {
+    name: "checklist_items"
+    table_name: "checklist_items"
+    acl_authenticated: [CREATE, READ, UPDATE, DELETE]
+    enable_subscriptions: true
+    create_access_rule: "_REQ_.created_by = _USER_.id AND EXISTS(SELECT 1 FROM trip_members WHERE trip_id = _REQ_.trip_id AND user_id = _USER_.id AND role IN ('owner', 'editor')) AND (_REQ_.assigned_to IS NULL OR EXISTS(SELECT 1 FROM trip_members WHERE trip_id = _REQ_.trip_id AND user_id = _REQ_.assigned_to))"
+    read_access_rule: "EXISTS(SELECT 1 FROM trip_members WHERE trip_id = _ROW_.trip_id AND user_id = _USER_.id)"
+    update_access_rule: "'trip_id' NOT IN _REQ_FIELDS_ AND 'created_by' NOT IN _REQ_FIELDS_ AND EXISTS(SELECT 1 FROM trip_members WHERE trip_id = _ROW_.trip_id AND user_id = _USER_.id AND role IN ('owner', 'editor')) AND (_REQ_.assigned_to IS NULL OR EXISTS(SELECT 1 FROM trip_members WHERE trip_id = _ROW_.trip_id AND user_id = _REQ_.assigned_to))"
+    delete_access_rule: "EXISTS(SELECT 1 FROM trip_members WHERE trip_id = _ROW_.trip_id AND user_id = _USER_.id AND role IN ('owner', 'editor'))"
+  },
+  {
+    name: "weather_briefings"
+    table_name: "weather_briefings"
+    acl_authenticated: [READ]
+    enable_subscriptions: true
+    read_access_rule: "EXISTS(SELECT 1 FROM trip_members WHERE trip_id = _ROW_.trip_id AND user_id = _USER_.id)"
+  },
+  {
+    name: "activity_events"
+    table_name: "activity_events"
+    acl_authenticated: [CREATE, READ]
+    enable_subscriptions: true
+    create_access_rule: "_REQ_.actor = _USER_.id AND EXISTS(SELECT 1 FROM trip_members WHERE trip_id = _REQ_.trip_id AND user_id = _USER_.id)"
+    read_access_rule: "EXISTS(SELECT 1 FROM trip_members WHERE trip_id = _ROW_.trip_id AND user_id = _USER_.id)"
+  }
+]
