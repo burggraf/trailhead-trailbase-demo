@@ -1,0 +1,60 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --color-canvas: var(--canvas);
+  --color-card: var(--card);
+  --color-stone: var(--stone);
+  --color-border: var(--border);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-forest: #173b2d;
+  --font-sans: Inter, ui-sans-serif, system-ui, sans-serif;
+}
+
+:root {
+  --canvas: #f7f5ef;
+  --card: #fffefb;
+  --stone: #eeece4;
+  --border: #dedbd0;
+  --ink: #18211c;
+  --muted: #68716b;
+  color: var(--ink);
+  background: var(--canvas);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+.dark {
+  --canvas: #101713;
+  --card: #17211b;
+  --stone: #202d25;
+  --border: #304037;
+  --ink: #edf3ef;
+  --muted: #a5b1aa;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body { margin: 0; min-width: 320px; min-height: 100vh; }
+button, input, textarea, select { font: inherit; }
+a { color: inherit; text-decoration: none; }
+code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+.eyebrow { font-size: .75rem; font-weight: 800; letter-spacing: .18em; text-transform: uppercase; color: #a65f13; }
+.section-title { font-size: 1.25rem; font-weight: 850; letter-spacing: -.02em; }
+.link { font-weight: 650; color: #1c6748; text-underline-offset: 3px; }
+.link:hover { text-decoration: underline; }
+.dark .link { color: #6ee7b7; }
+.input { min-height: 2.75rem; width: 100%; border-radius: .75rem; border: 1px solid var(--border); background: var(--card); padding: .5rem .75rem; color: var(--ink); outline: none; }
+.input:focus { border-color: #d8973c; box-shadow: 0 0 0 2px rgb(216 151 60 / .2); }
+.nav-link { display: inline-flex; min-height: 2.5rem; align-items: center; gap: .5rem; border-radius: .65rem; padding: .5rem .8rem; color: rgb(255 255 255 / .65); font-size: .875rem; font-weight: 650; }
+.nav-link:hover, .nav-link.active { background: rgb(255 255 255 / .1); color: white; }
+.menu-link { display: flex; min-height: 2.5rem; align-items: center; gap: .65rem; border-radius: .65rem; padding: .5rem .75rem; font-size: .875rem; text-align: left; }
+.menu-link:hover { background: var(--stone); }
+th, td { padding: .85rem 1rem; }
+.topo { background-image: repeating-radial-gradient(ellipse at 20% 30%, transparent 0 19px, rgb(255 255 255 / .22) 20px 21px, transparent 22px 41px); transform: scale(1.4) rotate(-8deg); }
+
+::selection { background: #f5c77b; color: #173b2d; }
