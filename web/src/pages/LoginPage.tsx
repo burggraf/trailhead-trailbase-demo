@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { Compass, KeyRound } from 'lucide-react'
-import { Navigate, useNavigate } from 'react-router-dom'
+import { Navigate, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../auth'
 import { Button, Card, Field, Input } from '../components/ui'
 import { authUi } from '../lib/trailbase'
@@ -9,7 +9,9 @@ import { message } from '../lib/api'
 export function LoginPage() {
   const { user, login, anonymous } = useAuth()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const [error, setError] = useState('')
+  const alert = searchParams.get('alert')
   const [busy, setBusy] = useState(false)
   if (user) return <Navigate to="/" replace />
 
@@ -43,7 +45,7 @@ export function LoginPage() {
           <form className="grid gap-4" onSubmit={submit}>
             <Field label="Email or username"><Input name="email" autoComplete="username" required /></Field>
             <Field label="Password"><Input name="password" type="password" autoComplete="current-password" minLength={8} required /></Field>
-            {error && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">{error}</p>}
+            {(error || alert) && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">{error || alert}</p>}
             <Button disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</Button>
           </form>
           <div className="my-5 flex items-center gap-3 text-xs text-muted"><span className="h-px flex-1 bg-border" />OR<span className="h-px flex-1 bg-border" /></div>

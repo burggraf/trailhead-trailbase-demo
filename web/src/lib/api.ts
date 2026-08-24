@@ -25,5 +25,11 @@ export async function uploadAvatar(file: File) {
 }
 
 export function message(error: unknown) {
-  return error instanceof Error ? error.message : 'Something went wrong'
+  if (error instanceof Error) return error.message
+  if (error && typeof error === 'object') {
+    if ('status' in error && error.status === 401) return 'Invalid credentials or email not verified.'
+    if ('message' in error && typeof error.message === 'string') return error.message
+    if ('msg' in error && typeof error.msg === 'string') return error.msg
+  }
+  return 'Something went wrong'
 }

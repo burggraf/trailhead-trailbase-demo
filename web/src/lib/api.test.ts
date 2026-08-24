@@ -6,6 +6,7 @@ import { recordFileUrl } from './trailbase'
 describe('client helpers', () => {
   it('keeps server errors useful and unknown errors safe', () => {
     expect(message(new Error('Forbidden'))).toBe('Forbidden')
+    expect(message({ status: 401, msg: 'Unauthorized' })).toBe('Invalid credentials or email not verified.')
     expect(message(null)).toBe('Something went wrong')
   })
 
