@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, CalendarDays, Check, CloudSun, Copy, ImagePlus, ListChecks, MapPin, Plus, RefreshCw, Route, Trash2, UserPlus, Users } from 'lucide-react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
@@ -19,6 +19,7 @@ export function TripPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [tab, setTab] = useState<Tab>('overview')
+  const [coverUploaded, setCoverUploaded] = useState(false)
   const key = useMemo(() => ['trip', tripId] as const, [tripId])
   const invalidate = () => queryClient.invalidateQueries({ queryKey: key })
 
@@ -40,8 +41,18 @@ export function TripPage() {
   const isOwner = role === 'owner'
 
   const removeTrip = useMutation({ mutationFn: () => client.records('trips').delete(tripId), onSuccess: () => navigate('/') })
-  const upload = useMutation({ mutationFn: (file: File) => uploadRecordFile('trips', tripId, 'cover', file), onSuccess: invalidate })
+  const upload = useMutation({
+    mutationFn: (file: File) => uploadRecordFile('trips', tripId, 'cover', file),
+    onMutate: () => setCoverUploaded(false),
+    onSuccess: async () => { await invalidate(); setCoverUploaded(true) },
+  })
   const refreshWeather = useMutation({ mutationFn: () => extension(`/trips/${tripId}/briefing`, { method: 'POST' }), onSuccess: invalidate })
+
+  useEffect(() => {
+    if (!coverUploaded) return
+    const timeout = window.setTimeout(() => setCoverUploaded(false), 3000)
+    return () => window.clearTimeout(timeout)
+  }, [coverUploaded])
 
   if (trip.isPending) return <div className="h-96 animate-pulse rounded-3xl bg-stone" />
   if (trip.isError) return <Card className="p-8"><h1 className="text-2xl font-black">Trip unavailable</h1><p className="mt-2 text-muted">{message(trip.error)}</p><Link className="link mt-5 inline-block" to="/">Back to trips</Link></Card>
@@ -63,6 +74,7 @@ export function TripPage() {
       {tab === 'members' && <Members tripId={tripId} members={members.data ?? []} isOwner={isOwner} invalidate={invalidate} />}
       {tab === 'activity' && <Activity events={activity.data ?? []} members={members.data ?? []} />}
     </div>
+    {coverUploaded && <div role="status" aria-live="polite" className="fixed bottom-5 right-5 z-50 flex items-center gap-2 rounded-xl bg-forest px-4 py-3 font-semibold text-white shadow-xl"><Check size={18} />Cover photo updated</div>}
   </>
 }
 
@@ -72,7 +84,7 @@ function Overview({ trip, weather, canEdit, isOwner, upload, refreshWeather, rem
   return <div className="grid gap-6 lg:grid-cols-[1.25fr_.75fr]">
     <Card className="p-6"><div className="flex items-center gap-2"><Route className="text-amber-600" /><h2 className="section-title">Trip details</h2></div><form className="mt-6 grid gap-4" onSubmit={submit}><Field label="Name"><Input name="title" defaultValue={trip.title} disabled={!canEdit} /></Field><Field label="Destination"><Input name="destination" defaultValue={trip.destination} disabled={!canEdit} /></Field><Field label="Status"><select name="status" defaultValue={trip.status} disabled={!canEdit} className="input">{['planning','booked','completed','cancelled'].map((value) => <option key={value}>{value}</option>)}</select></Field><Field label="Notes"><textarea name="notes" defaultValue={trip.notes} disabled={!canEdit} className="input min-h-36 resize-y" maxLength={5000} /></Field>{save.error && <p className="text-sm text-red-700">{message(save.error)}</p>}{canEdit && <Button disabled={save.isPending}>Save details</Button>}</form></Card>
     <div className="grid content-start gap-6"><Card className="p-6"><div className="flex items-center"><CloudSun className="mr-2 text-amber-600" /><h2 className="section-title">Weather briefing</h2></div>{weather ? <><p className="mt-4 text-lg font-semibold">{weather.summary}</p><p className="mt-2 text-xs text-muted">Updated {new Date(weather.fetched * 1000).toLocaleString()}</p></> : <p className="mt-4 text-sm text-muted">Generate a briefing using Nominatim and Open-Meteo.</p>}<Button className="mt-5 w-full" variant="secondary" disabled={refreshWeather.isPending} onClick={() => refreshWeather.mutate()}><RefreshCw size={16} className={refreshWeather.isPending ? 'animate-spin' : ''} />{weather ? 'Refresh' : 'Generate'} briefing</Button>{refreshWeather.error && <p className="mt-3 text-sm text-red-700">{message(refreshWeather.error)}</p>}</Card>
-    {canEdit && <Card className="p-6"><h2 className="section-title">Cover photo</h2><label className="mt-4 flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-border p-5 text-sm font-semibold text-muted hover:bg-stone"><ImagePlus size={18} />Upload JPEG, PNG, or WebP<input className="sr-only" type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => { const file = event.target.files?.[0]; if (file) upload.mutate(file) }} /></label>{upload.error && <p className="mt-2 text-sm text-red-700">{message(upload.error)}</p>}</Card>}
+    {canEdit && <Card className="p-6"><h2 className="section-title">Cover photo</h2><label className={`mt-4 flex items-center justify-center gap-2 rounded-xl border border-dashed border-border p-5 text-sm font-semibold text-muted ${upload.isPending ? 'cursor-wait opacity-70' : 'cursor-pointer hover:bg-stone'}`}>{upload.isPending ? <RefreshCw size={18} className="animate-spin" /> : <ImagePlus size={18} />}{upload.isPending ? 'Uploading cover…' : trip.cover ? 'Replace cover photo' : 'Upload JPEG, PNG, or WebP'}<input className="sr-only" type="file" accept="image/png,image/jpeg,image/webp" disabled={upload.isPending} onChange={(event) => { const file = event.target.files?.[0]; event.currentTarget.value = ''; if (file) upload.mutate(file) }} /></label>{upload.error && <p className="mt-2 text-sm text-red-700">{message(upload.error)}</p>}</Card>}
     {isOwner && <Card className="border-red-200 p-6 dark:border-red-950"><h2 className="font-bold text-red-700 dark:text-red-300">Danger zone</h2><p className="mt-2 text-sm text-muted">Deleting a trip cascades all tenant data and files.</p><Button className="mt-4" variant="danger" disabled={removeTrip.isPending} onClick={() => confirm('Delete this trip and all its data?') && removeTrip.mutate()}><Trash2 size={16} />Delete trip</Button></Card>}</div>
   </div>
 }
