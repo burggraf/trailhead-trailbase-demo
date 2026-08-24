@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
-import { dailyForecast, formatTemperature, isTripDay, message, weatherCodeLabel, weatherSummary } from './api'
+import { dailyForecast, formatPrecipitation, formatTemperature, formatWind, isTripDay, message, weatherCodeLabel, weatherSummary } from './api'
 import { recordFileUrl } from './trailbase'
 
 describe('client helpers', () => {
@@ -10,11 +10,15 @@ describe('client helpers', () => {
     expect(message(null)).toBe('Something went wrong')
   })
 
-  it('formats stored Celsius weather for each profile preference', () => {
+  it('formats metric source weather for each measurement system', () => {
     const weather = { summary: 'Stored summary', source_json: JSON.stringify({ current: { temperature_2m: 20 }, location: 'Sisters, Oregon' }) }
-    expect(weatherSummary(weather, 'C')).toBe('Currently 20°C in Sisters, Oregon')
-    expect(weatherSummary(weather, 'F')).toBe('Currently 68°F in Sisters, Oregon')
-    expect(weatherSummary({ ...weather, source_json: '{}' }, 'F')).toBe('Stored summary')
+    expect(weatherSummary(weather, 'metric')).toBe('Currently 20°C in Sisters, Oregon')
+    expect(weatherSummary(weather, 'imperial')).toBe('Currently 68°F in Sisters, Oregon')
+    expect(formatWind(30.8, 'metric')).toBe('30.8 km/h')
+    expect(formatWind(30.8, 'imperial')).toBe('19.1 mph')
+    expect(formatPrecipitation(6.2, 'metric')).toBe('6.2 mm')
+    expect(formatPrecipitation(6.2, 'imperial')).toBe('0.24 inches')
+    expect(weatherSummary({ ...weather, source_json: '{}' }, 'imperial')).toBe('Stored summary')
   })
 
   it('parses daily outlooks and labels WMO weather codes', () => {
@@ -31,7 +35,7 @@ describe('client helpers', () => {
     ])
     expect(weatherCodeLabel(0)).toBe('Clear')
     expect(weatherCodeLabel(61)).toBe('Rain')
-    expect(formatTemperature(20, 'F')).toBe('68°F')
+    expect(formatTemperature(20, 'imperial')).toBe('68°F')
     expect(isTripDay('2026-08-25', '2026-08-25', '2026-08-27')).toBe(true)
     expect(isTripDay('2026-08-24', '2026-08-25', '2026-08-27')).toBe(false)
   })

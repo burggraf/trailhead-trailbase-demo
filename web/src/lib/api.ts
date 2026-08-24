@@ -1,4 +1,4 @@
-import type { TemperatureUnit, WeatherBriefing } from '../types'
+import type { UnitSystem, WeatherBriefing } from '../types'
 import { client, trailbaseUrl } from './trailbase'
 
 export async function uploadRecordFile(api: string, id: string, column: string, file: File) {
@@ -35,9 +35,19 @@ export interface DailyForecast {
   windKph: number | null
 }
 
-export function formatTemperature(celsius: number, unit: TemperatureUnit) {
-  const temperature = unit === 'F' ? celsius * 9 / 5 + 32 : celsius
-  return `${Math.round(temperature)}°${unit}`
+export function formatTemperature(celsius: number, system: UnitSystem) {
+  const temperature = system === 'imperial' ? celsius * 9 / 5 + 32 : celsius
+  return `${Math.round(temperature)}°${system === 'imperial' ? 'F' : 'C'}`
+}
+
+export function formatWind(kph: number, system: UnitSystem) {
+  const value = system === 'imperial' ? kph / 1.609344 : kph
+  return `${Number(value.toFixed(1))} ${system === 'imperial' ? 'mph' : 'km/h'}`
+}
+
+export function formatPrecipitation(mm: number, system: UnitSystem) {
+  const value = system === 'imperial' ? mm / 25.4 : mm
+  return `${Number(value.toFixed(system === 'imperial' ? 2 : 1))} ${system === 'imperial' ? 'inches' : 'mm'}`
 }
 
 export function weatherCodeLabel(code: number) {
@@ -72,12 +82,12 @@ export function isTripDay(date: string, startDate: string, endDate: string) {
   return date >= startDate && date <= endDate
 }
 
-export function weatherSummary(weather: Pick<WeatherBriefing, 'summary' | 'source_json'>, unit: TemperatureUnit) {
+export function weatherSummary(weather: Pick<WeatherBriefing, 'summary' | 'source_json'>, system: UnitSystem) {
   try {
     const source = JSON.parse(weather.source_json) as { current?: { temperature_2m?: unknown }; location?: unknown }
     const celsius = source.current?.temperature_2m
     if (typeof celsius === 'number' && typeof source.location === 'string') {
-      return `Currently ${formatTemperature(celsius, unit)} in ${source.location}`
+      return `Currently ${formatTemperature(celsius, system)} in ${source.location}`
     }
   } catch { /* use the stored provider summary */ }
   return weather.summary
