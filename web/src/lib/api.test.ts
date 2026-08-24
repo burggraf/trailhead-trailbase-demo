@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
-import { message, weatherSummary } from './api'
+import { dailyForecast, formatTemperature, isTripDay, message, weatherCodeLabel, weatherSummary } from './api'
 import { recordFileUrl } from './trailbase'
 
 describe('client helpers', () => {
@@ -15,6 +15,25 @@ describe('client helpers', () => {
     expect(weatherSummary(weather, 'C')).toBe('Currently 20°C in Sisters, Oregon')
     expect(weatherSummary(weather, 'F')).toBe('Currently 68°F in Sisters, Oregon')
     expect(weatherSummary({ ...weather, source_json: '{}' }, 'F')).toBe('Stored summary')
+  })
+
+  it('parses daily outlooks and labels WMO weather codes', () => {
+    const weather = {
+      source_json: JSON.stringify({ daily: {
+        time: ['2026-08-24', '2026-08-25'], weather_code: [0, 61],
+        temperature_2m_max: [20.4, 18.2], temperature_2m_min: [10.1, 9.8],
+        precipitation_probability_max: [5, 80], precipitation_sum: [0, 6.2], wind_speed_10m_max: [12, 24],
+      } }),
+    }
+    expect(dailyForecast(weather)).toEqual([
+      { date: '2026-08-24', code: 0, highC: 20.4, lowC: 10.1, rainChance: 5, precipitationMm: 0, windKph: 12 },
+      { date: '2026-08-25', code: 61, highC: 18.2, lowC: 9.8, rainChance: 80, precipitationMm: 6.2, windKph: 24 },
+    ])
+    expect(weatherCodeLabel(0)).toBe('Clear')
+    expect(weatherCodeLabel(61)).toBe('Rain')
+    expect(formatTemperature(20, 'F')).toBe('68°F')
+    expect(isTripDay('2026-08-25', '2026-08-25', '2026-08-27')).toBe(true)
+    expect(isTripDay('2026-08-24', '2026-08-25', '2026-08-27')).toBe(false)
   })
 
   it('builds TrailBase record file URLs', () => {

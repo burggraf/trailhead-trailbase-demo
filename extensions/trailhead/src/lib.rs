@@ -269,7 +269,7 @@ async fn fetch_briefing(destination: &str) -> Result<JsonValue, HttpError> {
         .unwrap_or(destination);
 
     let weather_url = format!(
-        "https://api.open-meteo.com/v1/forecast?latitude={latitude}&longitude={longitude}&current=temperature_2m,apparent_temperature,weather_code,wind_speed_10m&timezone=auto"
+        "https://api.open-meteo.com/v1/forecast?latitude={latitude}&longitude={longitude}&current=temperature_2m,apparent_temperature,weather_code,wind_speed_10m&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,precipitation_sum,wind_speed_10m_max&forecast_days=7&timezone=auto"
     );
     let weather_uri = weather_url.parse::<http::Uri>().map_err(upstream)?;
     let weather_bytes = fetch::get(weather_uri).await.map_err(upstream)?;
@@ -278,6 +278,7 @@ async fn fetch_briefing(destination: &str) -> Result<JsonValue, HttpError> {
         return Err(upstream("weather provider rejected the request"));
     }
     let current = weather.get("current").cloned().unwrap_or_else(|| json!({}));
+    let daily = weather.get("daily").cloned().unwrap_or_else(|| json!({}));
     let temperature = current.get("temperature_2m").and_then(JsonValue::as_f64);
     let summary = temperature.map_or_else(
         || format!("Forecast available for {display_name}"),
@@ -289,6 +290,7 @@ async fn fetch_briefing(destination: &str) -> Result<JsonValue, HttpError> {
       "longitude": longitude,
       "location": display_name,
       "current": current,
+      "daily": daily,
       "provider": "Open-Meteo / OpenStreetMap Nominatim"
     }))
 }
