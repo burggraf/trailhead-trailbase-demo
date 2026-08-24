@@ -133,14 +133,14 @@ async fn pending_invites(req: Request) -> Result<Json<JsonValue>, HttpError> {
         .as_deref()
         .ok_or_else(|| bad_request("account has no email"))?;
     let rows = query(
-    "SELECT uuid_b64(i.id), uuid_b64(i.trip_id), t.title, t.destination, i.role, i.expires FROM trip_invites i JOIN trips t ON t.id = i.trip_id WHERE lower(i.email) = lower(?1) AND i.accepted = 0 AND i.expires > UNIXEPOCH() ORDER BY i.created DESC",
+    "SELECT i.id, i.trip_id, t.title, t.destination, i.role, i.expires FROM trip_invites i JOIN trips t ON t.id = i.trip_id WHERE lower(i.email) = lower(?1) AND i.accepted = 0 AND i.expires > UNIXEPOCH() ORDER BY i.created DESC",
     [Value::Text(email.to_string())],
   ).await.map_err(internal)?;
     let mut records = Vec::with_capacity(rows.len());
     for row in &rows {
         records.push(json!({
-          "id": text(row.first().ok_or_else(|| internal("invalid invite row"))?)?,
-          "trip_id": text(row.get(1).ok_or_else(|| internal("invalid invite row"))?)?,
+          "id": encode_id(&blob(row.first().ok_or_else(|| internal("invalid invite row"))?)?),
+          "trip_id": encode_id(&blob(row.get(1).ok_or_else(|| internal("invalid invite row"))?)?),
           "trip_title": text(row.get(2).ok_or_else(|| internal("invalid invite row"))?)?,
           "destination": text(row.get(3).ok_or_else(|| internal("invalid invite row"))?)?,
           "role": text(row.get(4).ok_or_else(|| internal("invalid invite row"))?)?,
@@ -201,7 +201,13 @@ async fn create_briefing(req: Request) -> Result<Json<JsonValue>, HttpError> {
         .and_then(|v| text(v).ok())
         .ok_or_else(|| HttpError::message(StatusCode::FORBIDDEN, "trip membership required"))?;
     let briefing = fetch_briefing(destination).await?;
-    store_briefing(&trip_id, Some(user_id), &briefing).await?;
+    store_briefing(&trip_id, Some(user_id.clone()), &briefing).await?;
+    execute(
+        "INSERT INTO activity_events (trip_id, actor, kind, summary) VALUES (?1, ?2, 'weather_refreshed', 'Refreshed the weather briefing')",
+        [Value::Blob(trip_id), Value::Blob(user_id)],
+    )
+    .await
+    .map_err(internal)?;
     Ok(Json(briefing))
 }
 
@@ -268,6 +274,9 @@ async fn fetch_briefing(destination: &str) -> Result<JsonValue, HttpError> {
     let weather_uri = weather_url.parse::<http::Uri>().map_err(upstream)?;
     let weather_bytes = fetch::get(weather_uri).await.map_err(upstream)?;
     let weather: JsonValue = serde_json::from_slice(&weather_bytes).map_err(upstream)?;
+    if weather.get("error").and_then(JsonValue::as_bool) == Some(true) {
+        return Err(upstream("weather provider rejected the request"));
+    }
     let current = weather.get("current").cloned().unwrap_or_else(|| json!({}));
     let temperature = current.get("temperature_2m").and_then(JsonValue::as_f64);
     let summary = temperature.map_or_else(

@@ -27,7 +27,7 @@ record_apis: [
     table_name: "trips"
     acl_authenticated: [READ, UPDATE, DELETE]
     read_access_rule: "EXISTS(SELECT 1 FROM trip_members WHERE trip_id = _ROW_.id AND user_id = _USER_.id)"
-    update_access_rule: "'owner' NOT IN _REQ_FIELDS_ AND EXISTS(SELECT 1 FROM trip_members WHERE trip_id = _ROW_.id AND user_id = _USER_.id AND role IN ('owner', 'editor'))"
+    update_access_rule: "'id' NOT IN _REQ_FIELDS_ AND 'owner' NOT IN _REQ_FIELDS_ AND EXISTS(SELECT 1 FROM trip_members WHERE trip_id = _ROW_.id AND user_id = _USER_.id AND role IN ('owner', 'editor'))"
     delete_access_rule: "EXISTS(SELECT 1 FROM trip_members WHERE trip_id = _ROW_.id AND user_id = _USER_.id AND role = 'owner')"
   },
   {
@@ -36,7 +36,7 @@ record_apis: [
     acl_authenticated: [READ, UPDATE, DELETE]
     enable_subscriptions: true
     read_access_rule: "EXISTS(SELECT 1 FROM trip_members me WHERE me.trip_id = _ROW_.trip_id AND me.user_id = _USER_.id)"
-    update_access_rule: "_ROW_.role != 'owner' AND 'trip_id' NOT IN _REQ_FIELDS_ AND 'user_id' NOT IN _REQ_FIELDS_ AND EXISTS(SELECT 1 FROM trip_members me WHERE me.trip_id = _ROW_.trip_id AND me.user_id = _USER_.id AND me.role = 'owner')"
+    update_access_rule: "_ROW_.role != 'owner' AND 'id' NOT IN _REQ_FIELDS_ AND 'trip_id' NOT IN _REQ_FIELDS_ AND 'user_id' NOT IN _REQ_FIELDS_ AND EXISTS(SELECT 1 FROM trip_members me WHERE me.trip_id = _ROW_.trip_id AND me.user_id = _USER_.id AND me.role = 'owner')"
     delete_access_rule: "_ROW_.role != 'owner' AND EXISTS(SELECT 1 FROM trip_members me WHERE me.trip_id = _ROW_.trip_id AND me.user_id = _USER_.id AND me.role = 'owner')"
   },
   {
@@ -53,7 +53,7 @@ record_apis: [
     enable_subscriptions: true
     create_access_rule: "_REQ_.created_by = _USER_.id AND EXISTS(SELECT 1 FROM trip_members WHERE trip_id = _REQ_.trip_id AND user_id = _USER_.id AND role IN ('owner', 'editor'))"
     read_access_rule: "EXISTS(SELECT 1 FROM trip_members WHERE trip_id = _ROW_.trip_id AND user_id = _USER_.id)"
-    update_access_rule: "'trip_id' NOT IN _REQ_FIELDS_ AND 'created_by' NOT IN _REQ_FIELDS_ AND EXISTS(SELECT 1 FROM trip_members WHERE trip_id = _ROW_.trip_id AND user_id = _USER_.id AND role IN ('owner', 'editor'))"
+    update_access_rule: "'id' NOT IN _REQ_FIELDS_ AND 'trip_id' NOT IN _REQ_FIELDS_ AND 'created_by' NOT IN _REQ_FIELDS_ AND EXISTS(SELECT 1 FROM trip_members WHERE trip_id = _ROW_.trip_id AND user_id = _USER_.id AND role IN ('owner', 'editor'))"
     delete_access_rule: "EXISTS(SELECT 1 FROM trip_members WHERE trip_id = _ROW_.trip_id AND user_id = _USER_.id AND role IN ('owner', 'editor'))"
   },
   {
@@ -63,7 +63,7 @@ record_apis: [
     enable_subscriptions: true
     create_access_rule: "_REQ_.created_by = _USER_.id AND EXISTS(SELECT 1 FROM trip_members WHERE trip_id = _REQ_.trip_id AND user_id = _USER_.id AND role IN ('owner', 'editor')) AND (_REQ_.assigned_to IS NULL OR EXISTS(SELECT 1 FROM trip_members WHERE trip_id = _REQ_.trip_id AND user_id = _REQ_.assigned_to))"
     read_access_rule: "EXISTS(SELECT 1 FROM trip_members WHERE trip_id = _ROW_.trip_id AND user_id = _USER_.id)"
-    update_access_rule: "'trip_id' NOT IN _REQ_FIELDS_ AND 'created_by' NOT IN _REQ_FIELDS_ AND EXISTS(SELECT 1 FROM trip_members WHERE trip_id = _ROW_.trip_id AND user_id = _USER_.id AND role IN ('owner', 'editor')) AND (_REQ_.assigned_to IS NULL OR EXISTS(SELECT 1 FROM trip_members WHERE trip_id = _ROW_.trip_id AND user_id = _REQ_.assigned_to))"
+    update_access_rule: "'id' NOT IN _REQ_FIELDS_ AND 'trip_id' NOT IN _REQ_FIELDS_ AND 'created_by' NOT IN _REQ_FIELDS_ AND EXISTS(SELECT 1 FROM trip_members WHERE trip_id = _ROW_.trip_id AND user_id = _USER_.id AND role IN ('owner', 'editor')) AND (_REQ_.assigned_to IS NULL OR EXISTS(SELECT 1 FROM trip_members WHERE trip_id = _ROW_.trip_id AND user_id = _REQ_.assigned_to))"
     delete_access_rule: "EXISTS(SELECT 1 FROM trip_members WHERE trip_id = _ROW_.trip_id AND user_id = _USER_.id AND role IN ('owner', 'editor'))"
   },
   {
