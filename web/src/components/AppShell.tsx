@@ -2,6 +2,7 @@ import { BookOpen, Compass, LogOut, Map, Moon, Settings, Sun, UserRound } from '
 import { useEffect, useState, type ReactNode } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth'
+import { AuthenticatedImage } from './AuthenticatedImage'
 import { Button } from './ui'
 import { client } from '../lib/trailbase'
 
@@ -23,7 +24,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         <Button variant="ghost" className="size-10 px-0 text-white/75 hover:bg-white/10 hover:text-white" aria-label="Toggle dark mode" onClick={() => setDark(!dark)}>{dark ? <Sun size={18} /> : <Moon size={18} />}</Button>
         <div className="group relative">
           <button className="flex items-center gap-2 rounded-xl p-1.5 hover:bg-white/10" aria-label="Account menu">
-            {avatar ? <img src={avatar} className="size-8 rounded-lg object-cover" alt="" /> : <span className="grid size-8 place-items-center rounded-lg bg-amber-400 font-bold text-forest">{(user?.email ?? user?.username ?? 'T')[0]?.toUpperCase()}</span>}
+            {avatar ? <AuthenticatedImage src={avatar} className="size-8 rounded-lg object-cover" alt="" /> : <span className="grid size-8 place-items-center rounded-lg bg-amber-400 font-bold text-forest">{(user?.email ?? user?.username ?? 'T')[0]?.toUpperCase()}</span>}
           </button>
           <div className="invisible absolute right-0 top-11 w-56 translate-y-1 rounded-xl border border-border bg-card p-2 text-ink opacity-0 shadow-xl transition group-focus-within:visible group-focus-within:translate-y-0 group-focus-within:opacity-100 group-hover:visible group-hover:translate-y-0 group-hover:opacity-100">
             <p className="truncate px-3 py-2 text-xs text-muted">{user?.email ?? user?.username ?? 'Anonymous traveler'}</p>

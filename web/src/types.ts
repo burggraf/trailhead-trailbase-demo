@@ -20,7 +20,7 @@ export interface Trip {
   notes: string
   latitude: number | null
   longitude: number | null
-  cover: { filename?: string; objectstore_path: string } | null
+  cover: { id: string; filename?: string; original_filename?: string } | null
   created: number
   updated: number
 }

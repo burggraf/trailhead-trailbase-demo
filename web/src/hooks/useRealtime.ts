@@ -7,25 +7,18 @@ export function useRealtime(api: string, queryKey: readonly unknown[], enabled =
   const stableKey = JSON.stringify(queryKey)
 
   useEffect(() => {
-    if (!enabled) return
-    let active = true
-    let reader: ReadableStreamDefaultReader | undefined
+    if (!enabled || !client.base) return
+    const url = new URL(`/api/records/v1/${api}/subscribe/*?ws=true`, client.base)
+    url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
+    const socket = new WebSocket(url)
 
-    const subscribedKey = JSON.parse(stableKey) as unknown[]
-    void client.records(api).subscribeAll().then((stream) => {
-      reader = stream.getReader()
-      const read = async (): Promise<void> => {
-        const result = await reader?.read()
-        if (!active || !result || result.done) return
-        await queryClient.invalidateQueries({ queryKey: subscribedKey })
-        return read()
-      }
-      return read()
-    }).catch(() => undefined)
+    socket.addEventListener('open', () => {
+      socket.send(JSON.stringify({ Init: { auth_token: client.tokens()?.auth_token ?? null } }))
+    })
+    socket.addEventListener('message', () => {
+      void queryClient.invalidateQueries({ queryKey: JSON.parse(stableKey) as unknown[] })
+    })
 
-    return () => {
-      active = false
-      void reader?.cancel()
-    }
+    return () => socket.close()
   }, [api, enabled, queryClient, stableKey])
 }

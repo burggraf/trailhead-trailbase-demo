@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, CalendarDays, Check, CloudSun, Copy, ImagePlus, ListChecks, MapPin, Plus, RefreshCw, Route, Trash2, UserPlus, Users } from 'lucide-react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '../auth'
+import { AuthenticatedImage } from '../components/AuthenticatedImage'
 import { Badge, Button, Card, Empty, Field, Input } from '../components/ui'
 import { uploadRecordFile, message } from '../lib/api'
 import { client, extension, recordFileUrl } from '../lib/trailbase'
@@ -48,7 +49,7 @@ export function TripPage() {
   return <>
     <Link to="/" className="mb-5 inline-flex items-center gap-2 text-sm font-semibold text-muted hover:text-ink"><ArrowLeft size={16} />All trips</Link>
     <section className="relative overflow-hidden rounded-3xl bg-forest text-white shadow-xl">
-      {trip.data.cover && <img className="absolute inset-0 size-full object-cover opacity-45" src={recordFileUrl('trips', tripId, 'cover')} alt="" />}
+      {trip.data.cover && <AuthenticatedImage className="absolute inset-0 size-full object-cover opacity-45" src={`${recordFileUrl('trips', tripId, 'cover')}?v=${trip.data.cover.id}`} alt="" />}
       <div className="absolute inset-0 bg-gradient-to-r from-forest via-forest/80 to-transparent" />
       <div className="relative p-7 sm:p-10"><div className="flex flex-wrap gap-2"><Badge tone="amber">{trip.data.status}</Badge><Badge>{role ?? 'member'}</Badge></div><h1 className="mt-5 max-w-3xl text-4xl font-black tracking-tight sm:text-6xl">{trip.data.title}</h1><div className="mt-5 flex flex-wrap gap-5 text-sm text-white/75"><span className="flex items-center gap-2"><MapPin size={17} />{trip.data.destination}</span><span className="flex items-center gap-2"><CalendarDays size={17} />{trip.data.start_date} → {trip.data.end_date}</span><span className="flex items-center gap-2"><Users size={17} />{members.data?.length ?? 0} travelers</span></div></div>
     </section>
