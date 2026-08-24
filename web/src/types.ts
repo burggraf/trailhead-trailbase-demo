@@ -1,10 +1,12 @@
 export type TripRole = 'owner' | 'editor' | 'viewer'
+export type TemperatureUnit = 'C' | 'F'
 
 export interface Profile {
   user: string
   display_name: string
   bio: string
   home_location: string
+  temperature_unit: TemperatureUnit
   created: number
   updated: number
 }

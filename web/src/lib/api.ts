@@ -1,3 +1,4 @@
+import type { TemperatureUnit, WeatherBriefing } from '../types'
 import { client, trailbaseUrl } from './trailbase'
 
 export async function uploadRecordFile(api: string, id: string, column: string, file: File) {
@@ -22,6 +23,18 @@ export async function uploadAvatar(file: File) {
     body,
   })
   if (!response.ok) throw new Error(await response.text() || `Avatar upload failed (${response.status})`)
+}
+
+export function weatherSummary(weather: Pick<WeatherBriefing, 'summary' | 'source_json'>, unit: TemperatureUnit) {
+  try {
+    const source = JSON.parse(weather.source_json) as { current?: { temperature_2m?: unknown }; location?: unknown }
+    const celsius = source.current?.temperature_2m
+    if (typeof celsius === 'number' && typeof source.location === 'string') {
+      const temperature = unit === 'F' ? celsius * 9 / 5 + 32 : celsius
+      return `Currently ${Math.round(temperature)}°${unit} in ${source.location}`
+    }
+  } catch { /* use the stored provider summary */ }
+  return weather.summary
 }
 
 export function message(error: unknown) {
