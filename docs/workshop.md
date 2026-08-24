@@ -12,6 +12,8 @@ The branded login calls `client.login()`. Registration, recovery, OTP, MFA, emai
 
 Try **Try anonymously**, then Settings → promote the account. Do not log out before promotion: anonymous accounts cannot authenticate a second time.
 
+Registration, verification, password-reset, and OTP messages are captured by Mailpit at <http://localhost:8025>. `dev.sh` starts Mailpit before TrailBase and configures unencrypted local SMTP on port 1025. Replace it with a real SMTP provider in production.
+
 Profiles are application data linked to `_user`. Avatar bytes use TrailBase’s dedicated auth avatar API.
 
 ## 3. Tenant creation

@@ -6,9 +6,10 @@ A collaborative trip planner built to teach TrailBase through a real client-side
 
 ## Quick start
 
-Requirements: `trail`, Rust with `wasm32-wasip2`, Node, npm, and curl.
+Requirements: `trail`, Rust with `wasm32-wasip2`, Node, npm, curl, and Mailpit.
 
 ```bash
+brew install mailpit # once on macOS
 ./dev.sh
 ```
 
@@ -16,6 +17,7 @@ Open:
 
 - App: http://localhost:5173
 - TrailBase admin: http://localhost:4000/_/admin/
+- Mailpit inbox: http://localhost:8025
 - Record API health: http://localhost:4000/api/healthcheck
 
 Local workshop accounts all use password `secret123`:
@@ -93,5 +95,5 @@ scripts/authorization-smoke.sh
 - JWT auth tokens remain valid until their short expiry even after logout; refresh tokens are revocable.
 - Anonymous users cannot sign in again after losing/revoking their only session. OAuth promotion is not currently supported.
 - Rust guest APIs are still unstable, so `trailbase-wasm` is pinned exactly.
-- Local email falls back to the host sendmail setup unless SMTP is configured.
+- Local auth email is captured by Mailpit; use a real SMTP provider in production.
 - WASM files are discovered at startup; restart TrailBase after rebuilding a component.

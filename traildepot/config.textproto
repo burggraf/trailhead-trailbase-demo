@@ -1,5 +1,11 @@
 # Trailhead local development configuration.
-email {}
+email {
+  smtp_host: "localhost"
+  smtp_port: 1025
+  smtp_encryption: SMTP_ENCRYPTION_NONE
+  sender_name: "Trailhead"
+  sender_address: "noreply@trailhead.test"
+}
 server {
   application_name: "Trailhead"
   site_url: "http://localhost:4000"
