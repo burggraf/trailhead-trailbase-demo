@@ -56,7 +56,7 @@ if curl -fsS "$TRAILBASE_URL/api/healthcheck" >/dev/null 2>&1; then
 else
   log "Starting TrailBase…"
   # TrailBase's --dev flag suppresses email delivery; explicit CORS keeps the SPA working while Mailpit receives auth mail.
-  trail run --cors-allowed-origins="$WEB_URL" &
+  trail run --public-dir "$ROOT/web/public" --cors-allowed-origins="$WEB_URL" &
   trail_pid="$!"
   PIDS+=("$trail_pid")
   for _ in {1..60}; do

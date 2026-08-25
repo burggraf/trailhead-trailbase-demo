@@ -1,4 +1,4 @@
-import { BookOpen, Compass, LogOut, Map, Moon, Settings, Sun, UserRound } from 'lucide-react'
+import { BookOpen, LogOut, Map, Moon, Settings, Sun, UserRound } from 'lucide-react'
 import { useEffect, useState, type ReactNode } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth'
@@ -16,7 +16,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   return <div className="min-h-screen bg-canvas">
     <header className="sticky top-0 z-30 border-b border-white/10 bg-forest text-white shadow-lg shadow-forest/10">
       <div className="mx-auto flex h-16 max-w-7xl items-center gap-5 px-4 sm:px-6">
-        <NavLink to="/" className="mr-auto flex items-center gap-2 text-lg font-black"><span className="grid size-9 place-items-center rounded-xl bg-white/12"><Compass size={20} /></span>Trailhead</NavLink>
+        <NavLink to="/" className="mr-auto flex items-center gap-2 text-lg font-black"><img src="/trailhead-logo.svg" className="size-9" alt="" />Trailhead</NavLink>
         <nav aria-label="Main navigation" className="hidden items-center gap-1 md:flex">
           <NavLink to="/" end className="nav-link"><Map size={17} />Trips</NavLink>
           <NavLink to="/learn" className="nav-link"><BookOpen size={17} />Learn</NavLink>

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" role="img" aria-labelledby="title description">
+  <title id="title">Trailhead</title>
+  <desc id="description">A winding trail through layered mountains beneath the sun</desc>
+  <rect width="48" height="48" rx="14" fill="#F1B85B"/>
+  <circle cx="35" cy="12" r="4" fill="#FFF4D6"/>
+  <path d="M3 37 16 18l8 11 7-9 14 17v8H3Z" fill="#2C624B"/>
+  <path d="m3 39 12-12 7 8 6-7 17 13v4H3Z" fill="#173B2D"/>
+  <path d="M26 45c-1-7-8-7-7-13 .5-3 4-5 6-8" fill="none" stroke="#FFF8E8" stroke-width="3" stroke-linecap="round"/>
+</svg>

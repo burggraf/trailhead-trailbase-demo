@@ -90,6 +90,17 @@ cargo build --manifest-path extensions/trailhead/Cargo.toml --release --target w
 scripts/authorization-smoke.sh
 ```
 
+## Production hosting
+
+Build the SPA and let TrailBase serve it from the same public origin used by auth emails:
+
+```bash
+npm --prefix web run build
+trail run --public-dir web/dist --spa
+```
+
+Set `server.site_url` to that public HTTPS origin. The branded emails load `trailhead-logo-email.png` from it; `dev.sh` serves the same asset locally from `web/public`.
+
 ## TrailBase caveats shown intentionally
 
 - JWT auth tokens remain valid until their short expiry even after logout; refresh tokens are revocable.

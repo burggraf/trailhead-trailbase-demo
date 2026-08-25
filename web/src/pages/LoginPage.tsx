@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react'
-import { Compass, KeyRound } from 'lucide-react'
+import { KeyRound } from 'lucide-react'
 import { Navigate, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../auth'
 import { Button, Card, Field, Input } from '../components/ui'
@@ -33,13 +33,13 @@ export function LoginPage() {
   return <main className="grid min-h-screen lg:grid-cols-[1.05fr_.95fr]">
     <section className="relative hidden overflow-hidden bg-forest p-12 text-white lg:flex lg:flex-col lg:justify-between">
       <div className="topo absolute inset-0 opacity-20" />
-      <div className="relative flex items-center gap-3 text-lg font-bold"><span className="grid size-10 place-items-center rounded-xl bg-white/15"><Compass /></span>Trailhead</div>
+      <div className="relative flex items-center gap-3 text-lg font-bold"><img src="/trailhead-logo.svg" className="size-10" alt="" />Trailhead</div>
       <div className="relative max-w-xl"><p className="mb-5 text-sm font-bold uppercase tracking-[.24em] text-amber-300">Plan together. Go farther.</p><h1 className="text-6xl font-black leading-[.98] tracking-tight">Turn someday into a shared itinerary.</h1><p className="mt-6 max-w-lg text-lg leading-relaxed text-white/70">Trips, checklists, forecasts, files, and your favorite people—in one calm place.</p></div>
       <p className="relative text-sm text-white/55">Built as a hands-on TrailBase workshop.</p>
     </section>
     <section className="grid place-items-center bg-canvas px-5 py-12">
       <div className="w-full max-w-md">
-        <div className="mb-8 lg:hidden"><div className="flex items-center gap-2 text-xl font-black text-forest"><Compass /> Trailhead</div></div>
+        <div className="mb-8 lg:hidden"><div className="flex items-center gap-2 text-xl font-black text-forest"><img src="/trailhead-logo.svg" className="size-9" alt="" />Trailhead</div></div>
         <p className="text-sm font-bold uppercase tracking-[.18em] text-amber-700">Welcome back</p><h2 className="mt-2 text-4xl font-black tracking-tight">Your next trip starts here.</h2><p className="mt-3 text-muted">Sign in with your TrailBase account.</p>
         <Card className="mt-8 p-6">
           <form className="grid gap-4" onSubmit={submit}>
