@@ -87,6 +87,7 @@ cargo fmt --manifest-path extensions/trailhead/Cargo.toml -- --check
 cargo clippy --manifest-path extensions/trailhead/Cargo.toml --target wasm32-wasip2 --no-deps -- -D warnings
 cargo build --manifest-path extensions/trailhead/Cargo.toml --release --target wasm32-wasip2
 
+python3 scripts/invitation-migration-test.py
 scripts/authorization-smoke.sh
 ```
 

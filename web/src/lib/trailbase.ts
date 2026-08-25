@@ -4,6 +4,7 @@ export const trailbaseUrl = import.meta.env.VITE_TRAILBASE_URL ?? 'http://localh
 
 const listeners = new Set<(user?: User) => void>()
 const authTokensKey = 'trailhead-auth-tokens'
+const authReturnKey = 'trailhead-auth-return'
 
 function savedTokens(): Tokens | undefined {
   if (typeof window === 'undefined') return undefined
@@ -32,6 +33,22 @@ export const client = initClient(trailbaseUrl, {
 export function onAuthChange(listener: (user?: User) => void) {
   listeners.add(listener)
   return () => { listeners.delete(listener) }
+}
+
+export function safeReturnPath(value: unknown) {
+  return typeof value === 'string' && value.startsWith('/') && !value.startsWith('//') ? value : '/'
+}
+
+export function rememberAuthReturn(value: unknown) {
+  try { window.sessionStorage.setItem(authReturnKey, safeReturnPath(value)) } catch { /* callback falls back to home */ }
+}
+
+export function takeAuthReturn() {
+  try {
+    const value = safeReturnPath(window.sessionStorage.getItem(authReturnKey))
+    window.sessionStorage.removeItem(authReturnKey)
+    return value
+  } catch { return '/' }
 }
 
 export function authUi(path: string, redirect = window.location.origin) {

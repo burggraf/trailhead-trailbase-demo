@@ -82,6 +82,7 @@ struct InviteEmail {
     inviter_name: String,
     account_state: String,
     expires: i64,
+    attempt: i64,
 }
 
 async fn whoami(req: Request) -> Result<Json<JsonValue>, HttpError> {
@@ -195,7 +196,7 @@ async fn create_invite(mut req: Request) -> Result<Json<JsonValue>, HttpError> {
         ));
     }
     tx.execute(
-        "INSERT INTO trip_invites (trip_id, inviter, email, role, expires) VALUES (?1, ?2, ?3, ?4, UNIXEPOCH() + 604800) ON CONFLICT(trip_id, email) DO UPDATE SET inviter = excluded.inviter, role = excluded.role, expires = excluded.expires, email_status = 'pending', last_sent = NULL",
+        "INSERT INTO trip_invites (trip_id, inviter, email, role, expires, email_attempt) VALUES (?1, ?2, ?3, ?4, UNIXEPOCH() + 604800, 1) ON CONFLICT(trip_id, email) DO UPDATE SET inviter = excluded.inviter, role = excluded.role, expires = excluded.expires, email_status = 'pending', last_sent = NULL, email_attempt = trip_invites.email_attempt + 1",
         &[
             Value::Blob(trip_id.clone()),
             Value::Blob(user_id),
@@ -206,7 +207,7 @@ async fn create_invite(mut req: Request) -> Result<Json<JsonValue>, HttpError> {
     .map_err(internal)?;
     let rows = tx
         .query(
-            "SELECT i.id, i.email, i.role, t.title, t.destination, CAST(COALESCE(p.display_name, u.username, u.email, 'A traveler') AS TEXT), CASE WHEN EXISTS(SELECT 1 FROM _user account WHERE account.email = i.email) THEN 'verified' WHEN EXISTS(SELECT 1 FROM _user account WHERE account.unverified_email = i.email) THEN 'unverified' ELSE 'new' END, i.expires FROM trip_invites i JOIN trips t ON t.id = i.trip_id JOIN _user u ON u.id = i.inviter LEFT JOIN profiles p ON p.user = i.inviter WHERE i.trip_id = ?1 AND i.email = ?2",
+            "SELECT i.id, i.email, i.role, t.title, t.destination, CAST(COALESCE(p.display_name, u.username, u.email, 'A traveler') AS TEXT), CASE WHEN EXISTS(SELECT 1 FROM _user account WHERE account.email = i.email) THEN 'verified' WHEN EXISTS(SELECT 1 FROM _user account WHERE account.unverified_email = i.email) THEN 'unverified' ELSE 'new' END, i.expires, i.email_attempt FROM trip_invites i JOIN trips t ON t.id = i.trip_id JOIN _user u ON u.id = i.inviter LEFT JOIN profiles p ON p.user = i.inviter WHERE i.trip_id = ?1 AND i.email = ?2",
             &[Value::Blob(trip_id), Value::Text(email)],
         )
         .map_err(internal)?;
@@ -336,7 +337,7 @@ async fn resend_invite(req: Request) -> Result<Json<JsonValue>, HttpError> {
     require_role(&mut tx, &trip_id, &user_id, "owner")?;
     let affected = tx
         .execute(
-            "UPDATE trip_invites SET expires = UNIXEPOCH() + 604800, email_status = 'pending', last_sent = NULL WHERE id = ?1 AND trip_id = ?2",
+            "UPDATE trip_invites SET expires = UNIXEPOCH() + 604800, email_status = 'pending', last_sent = NULL, email_attempt = email_attempt + 1 WHERE id = ?1 AND trip_id = ?2",
             &[Value::Blob(invite_id.clone()), Value::Blob(trip_id)],
         )
         .map_err(internal)?;
@@ -348,7 +349,7 @@ async fn resend_invite(req: Request) -> Result<Json<JsonValue>, HttpError> {
     }
     let rows = tx
         .query(
-            "SELECT i.id, i.email, i.role, t.title, t.destination, CAST(COALESCE(p.display_name, u.username, u.email, 'A traveler') AS TEXT), CASE WHEN EXISTS(SELECT 1 FROM _user account WHERE account.email = i.email) THEN 'verified' WHEN EXISTS(SELECT 1 FROM _user account WHERE account.unverified_email = i.email) THEN 'unverified' ELSE 'new' END, i.expires FROM trip_invites i JOIN trips t ON t.id = i.trip_id JOIN _user u ON u.id = i.inviter LEFT JOIN profiles p ON p.user = i.inviter WHERE i.id = ?1",
+            "SELECT i.id, i.email, i.role, t.title, t.destination, CAST(COALESCE(p.display_name, u.username, u.email, 'A traveler') AS TEXT), CASE WHEN EXISTS(SELECT 1 FROM _user account WHERE account.email = i.email) THEN 'verified' WHEN EXISTS(SELECT 1 FROM _user account WHERE account.unverified_email = i.email) THEN 'unverified' ELSE 'new' END, i.expires, i.email_attempt FROM trip_invites i JOIN trips t ON t.id = i.trip_id JOIN _user u ON u.id = i.inviter LEFT JOIN profiles p ON p.user = i.inviter WHERE i.id = ?1",
             &[Value::Blob(invite_id)],
         )
         .map_err(internal)?;
@@ -430,12 +431,9 @@ async fn refresh_weather_job() -> Result<(), HttpError> {
 }
 
 async fn cleanup_invites_job() -> Result<(), HttpError> {
-    execute(
-        "DELETE FROM trip_invites WHERE expires <= UNIXEPOCH()",
-        [],
-    )
-    .await
-    .map_err(internal)?;
+    execute("DELETE FROM trip_invites WHERE expires <= UNIXEPOCH()", [])
+        .await
+        .map_err(internal)?;
     Ok(())
 }
 
@@ -576,6 +574,10 @@ fn invite_email(row: &[Value]) -> Result<InviteEmail, HttpError> {
             row.get(7)
                 .ok_or_else(|| internal("invalid invitation email"))?,
         )?,
+        attempt: integer(
+            row.get(8)
+                .ok_or_else(|| internal("invalid invitation email"))?,
+        )?,
     })
 }
 
@@ -588,10 +590,11 @@ async fn deliver_and_record(invite: &InviteEmail) -> &'static str {
         }
     };
     if let Err(err) = execute(
-        "UPDATE trip_invites SET email_status = ?1, last_sent = UNIXEPOCH() WHERE id = ?2",
+        "UPDATE trip_invites SET email_status = ?1, last_sent = UNIXEPOCH() WHERE id = ?2 AND email_attempt = ?3",
         [
             Value::Text(status.to_string()),
             Value::Blob(invite.id.clone()),
+            Value::Integer(invite.attempt),
         ],
     )
     .await
@@ -625,7 +628,7 @@ async fn deliver_invitation(invite: &InviteEmail) -> Result<(), String> {
                 ("user-agent", "Trailhead/1.0".to_string()),
                 (
                     "idempotency-key",
-                    format!("trip-invite-{}-{}", encode_id(&invite.id), invite.expires),
+                    invitation_idempotency_key(&invite.id, invite.attempt),
                 ),
             ],
             &payload,
@@ -678,6 +681,10 @@ async fn post_json(
     Ok(())
 }
 
+fn invitation_idempotency_key(id: &[u8], attempt: i64) -> String {
+    format!("trip-invite-{}-{attempt}", encode_id(id))
+}
+
 fn invitation_message(invite: &InviteEmail, app_url: &str) -> (String, String, String) {
     let trip = escape_html(&invite.trip_title);
     let destination = escape_html(&invite.destination);
@@ -706,7 +713,8 @@ fn invitation_message(invite: &InviteEmail, app_url: &str) -> (String, String, S
         "<!doctype html><html lang='en'><body style='margin:0;background:#f7f5ef;color:#18211c;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Arial,sans-serif'><table role='presentation' width='100%' cellspacing='0' cellpadding='0' bgcolor='#f7f5ef'><tr><td align='center' style='padding:36px 16px'><table role='presentation' width='600' cellspacing='0' cellpadding='0' style='width:100%;max-width:600px;background:#fffefb;border:1px solid #dedbd0;border-radius:20px;overflow:hidden'><tr><td bgcolor='#173b2d' style='padding:30px 40px;color:#fff'><div style='color:#f5c77b;font-size:11px;font-weight:800;letter-spacing:2px;text-transform:uppercase'>Trip invitation</div><h1 style='margin:10px 0 0;font-size:34px;line-height:40px'>{trip}</h1></td></tr><tr><td style='padding:36px 40px'><p style='margin:0 0 18px;font-size:16px;line-height:26px'><strong>{inviter}</strong> invited you to plan a trip to <strong>{destination}</strong> as a <strong>{role}</strong>.</p><p style='margin:0 0 26px;color:#4e5c54;font-size:16px;line-height:26px'>{detail}</p><table role='presentation' cellspacing='0' cellpadding='0'><tr><td bgcolor='#f1b85b' style='border-radius:12px'><a href='{link}' style='display:inline-block;padding:15px 24px;color:#173b2d;font-weight:800;text-decoration:none'>Review invitation &rarr;</a></td></tr></table><p style='margin:26px 0 0;color:#68716b;font-size:13px;line-height:21px'>{action} This invitation expires in 7 days. Joining is always your choice.</p></td></tr><tr><td align='center' bgcolor='#173b2d' style='padding:22px;color:#9fb2a7;font-size:12px'>Sent by Trailhead &middot; Plan together. Go farther.</td></tr></table></td></tr></table></body></html>"
     );
     let text = format!(
-        "{inviter} invited you to {trip} in {destination} as a {role}.\n\n{detail}\n\nReview invitation: {link}\n\nThis invitation expires in 7 days. Joining is always your choice."
+        "{} invited you to {} in {} as a {}.\n\n{detail}\n\nReview invitation: {link}\n\nThis invitation expires in 7 days. Joining is always your choice.",
+        invite.inviter_name, invite.trip_title, invite.destination, invite.role
     );
     (subject, html, text)
 }
@@ -862,12 +870,22 @@ mod tests {
             inviter_name: "Alice".to_string(),
             account_state: "new".to_string(),
             expires: 1,
+            attempt: 1,
         };
         let (_, html, text) = invitation_message(&invite, DEV_APP_URL);
         assert!(html.contains("Alps &lt;script&gt;"));
         assert!(html.contains("A&amp;B"));
         assert!(!html.contains("Alps <script>"));
         assert!(text.contains("Create and verify"));
+    }
+
+    #[test]
+    fn each_email_attempt_has_a_distinct_idempotency_key() {
+        let id = [7_u8; 16];
+        assert_ne!(
+            invitation_idempotency_key(&id, 1),
+            invitation_idempotency_key(&id, 2)
+        );
     }
 
     #[test]

@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BrowserRouter, Navigate, Route, Routes, useNavigate } from 'react-router-dom'
 import { AuthProvider, Protected, useAuth } from './auth'
 import { AppShell } from './components/AppShell'
-import { client } from './lib/trailbase'
+import { client, takeAuthReturn } from './lib/trailbase'
 import { DashboardPage } from './pages/DashboardPage'
 import { InvitationsPage } from './pages/InvitationsPage'
 import { LearnPage } from './pages/LearnPage'
@@ -13,10 +13,14 @@ import { SettingsPage } from './pages/SettingsPage'
 import { TripPage } from './pages/TripPage'
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: 15_000, retry: 1 } } })
+let authCallbackReturn: string | undefined
 
 function AuthCallback() {
   const navigate = useNavigate()
-  useEffect(() => { client.checkCookies().finally(() => navigate(client.user() ? '/' : '/login', { replace: true })) }, [navigate])
+  useEffect(() => {
+    authCallbackReturn ??= takeAuthReturn()
+    client.checkCookies().finally(() => navigate(client.user() ? authCallbackReturn! : '/login', { replace: true, state: { from: authCallbackReturn } }))
+  }, [navigate])
   return <div className="grid min-h-screen place-items-center text-sm text-muted">Finishing sign in…</div>
 }
 

@@ -11,14 +11,15 @@ export function InvitationsPage() {
   const { user } = useAuth()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
-  const invitations = useQuery({ queryKey: ['invites'], queryFn: async () => (await extension<{ records: PendingInvite[] }>('/invites')).records, enabled: !!user })
+  const invitationKey = ['invites', user?.id] as const
+  const invitations = useQuery({ queryKey: invitationKey, queryFn: async () => (await extension<{ records: PendingInvite[] }>('/invites')).records, enabled: !!user })
   const accept = useMutation({
     mutationFn: (id: string) => extension<{ trip_id: string }>(`/invites/${id}/accept`, { method: 'POST' }),
-    onSuccess: async ({ trip_id }) => { await Promise.all([queryClient.invalidateQueries({ queryKey: ['invites'] }), queryClient.invalidateQueries({ queryKey: ['trips'] })]); navigate(`/trips/${trip_id}`) },
+    onSuccess: async ({ trip_id }) => { await Promise.all([queryClient.invalidateQueries({ queryKey: invitationKey }), queryClient.invalidateQueries({ queryKey: ['trips'] })]); navigate(`/trips/${trip_id}`) },
   })
   const decline = useMutation({
     mutationFn: (id: string) => extension(`/invites/${id}`, { method: 'DELETE' }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['invites'] }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: invitationKey }),
   })
 
   if (!user) {

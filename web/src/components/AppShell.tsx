@@ -8,20 +8,27 @@ import { Button } from './ui'
 import { client, extension } from '../lib/trailbase'
 import type { PendingInvite } from '../types'
 
+const redirectedUsers = new Set<string>()
+
 export function AppShell({ children }: { children: ReactNode }) {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
-  const invitations = useQuery({ queryKey: ['invites'], queryFn: async () => (await extension<{ records: PendingInvite[] }>('/invites')).records, enabled: !!user?.email })
+  const invitations = useQuery({ queryKey: ['invites', user?.id], queryFn: async () => (await extension<{ records: PendingInvite[] }>('/invites')).records, enabled: !!user?.email })
   const [dark, setDark] = useState(() => { try { return window.localStorage.theme === 'dark' || (!('theme' in window.localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches) } catch { return false } })
   useEffect(() => { document.documentElement.classList.toggle('dark', dark); try { window.localStorage.theme = dark ? 'dark' : 'light' } catch { /* keep the in-memory preference */ } }, [dark])
   useEffect(() => {
     if (!user || !invitations.data?.length || location.pathname === '/invitations') return
     const key = `trailhead-invitation-redirect:${user.id}`
+    if (redirectedUsers.has(key)) return
     try {
-      if (sessionStorage.getItem(key)) return
-      sessionStorage.setItem(key, '1')
-    } catch { /* redirect still works when session storage is unavailable */ }
+      if (window.sessionStorage.getItem(key)) {
+        redirectedUsers.add(key)
+        return
+      }
+      window.sessionStorage.setItem(key, '1')
+    } catch { /* the in-memory fallback still prevents repeated redirects */ }
+    redirectedUsers.add(key)
     navigate('/invitations')
   }, [invitations.data, location.pathname, navigate, user])
   const avatar = user ? client.avatarUrl(user.id) : undefined

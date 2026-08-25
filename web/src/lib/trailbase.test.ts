@@ -19,10 +19,19 @@ const storage = {
 describe('TrailBase authentication persistence', () => {
   beforeEach(() => {
     storage.clear()
-    vi.stubGlobal('window', { localStorage: storage })
+    vi.stubGlobal('window', { localStorage: storage, sessionStorage: storage })
     mocks.client.tokens.mockReset()
     mocks.initClient.mockClear()
     vi.resetModules()
+  })
+
+  it('stores only safe internal authentication return paths', async () => {
+    const { rememberAuthReturn, takeAuthReturn } = await import('./trailbase')
+    rememberAuthReturn('/invitations')
+    expect(takeAuthReturn()).toBe('/invitations')
+    expect(takeAuthReturn()).toBe('/')
+    rememberAuthReturn('//evil.example')
+    expect(takeAuthReturn()).toBe('/')
   })
 
   it('restores, updates, and clears auth tokens', async () => {

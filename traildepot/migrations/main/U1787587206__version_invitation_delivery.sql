@@ -1,0 +1,1 @@
+ALTER TABLE trip_invites ADD COLUMN email_attempt INTEGER NOT NULL DEFAULT 0;

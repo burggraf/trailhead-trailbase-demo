@@ -88,6 +88,10 @@ else
 fi
 
 log "Ready: app $WEB_URL · TrailBase $TRAILBASE_URL · inbox $MAILPIT_URL · admin $TRAILBASE_URL/_/admin/"
+if ((${#PIDS[@]} == 0)); then
+  log "All services were already running."
+  exit 0
+fi
 log "Press Ctrl+C to stop services started by this script."
 
 while :; do

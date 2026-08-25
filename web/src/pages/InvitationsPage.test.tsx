@@ -96,4 +96,17 @@ describe('InvitationsPage', () => {
     const link = await page.findByRole('link', { name: /Invitations.*1/ })
     expect(link.getAttribute('href')).toBe('/invitations')
   })
+
+  it('does not reuse one account invitation count for another account', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    mocks.extension.mockImplementation(async () => ({ records: mocks.user?.id === 'user-1' ? [invitation] : [] }))
+    mocks.user = { id: 'user-1', email: 'one@example.com' }
+    const tree = () => <QueryClientProvider client={queryClient}><MemoryRouter initialEntries={['/invitations']}><AppShell><div>Trips</div></AppShell></MemoryRouter></QueryClientProvider>
+    const page = render(tree())
+    expect(await page.findByRole('link', { name: /Invitations.*1/ })).toBeTruthy()
+
+    mocks.user = { id: 'user-2', email: 'two@example.com' }
+    page.rerender(tree())
+    await waitFor(() => expect(page.getByRole('link', { name: 'Invitations 0' })).toBeTruthy())
+  })
 })

@@ -15,9 +15,20 @@ CREATE TABLE trip_invites (
 ) STRICT;
 
 INSERT INTO trip_invites (id, trip_id, inviter, email, role, expires, created)
-SELECT id, trip_id, inviter, email, role, expires, created
-FROM trip_invites_legacy
-WHERE accepted = 0 AND expires > UNIXEPOCH();
+SELECT legacy.id, legacy.trip_id, legacy.inviter, legacy.email, legacy.role, legacy.expires, legacy.created
+FROM trip_invites_legacy AS legacy
+WHERE legacy.accepted = 0
+  AND legacy.expires > UNIXEPOCH()
+  AND legacy.id = (
+    SELECT candidate.id
+    FROM trip_invites_legacy AS candidate
+    WHERE candidate.trip_id = legacy.trip_id
+      AND candidate.email = legacy.email
+      AND candidate.accepted = 0
+      AND candidate.expires > UNIXEPOCH()
+    ORDER BY candidate.created DESC, candidate.id DESC
+    LIMIT 1
+  );
 
 DROP TABLE trip_invites_legacy;
 CREATE INDEX trip_invites_email_idx ON trip_invites(email, expires);

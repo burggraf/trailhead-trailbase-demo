@@ -3,7 +3,7 @@ import { KeyRound } from 'lucide-react'
 import { Navigate, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../auth'
 import { Button, Card, Field, Input } from '../components/ui'
-import { authUi } from '../lib/trailbase'
+import { authUi, rememberAuthReturn, safeReturnPath } from '../lib/trailbase'
 import { message } from '../lib/api'
 
 export function LoginPage() {
@@ -11,7 +11,7 @@ export function LoginPage() {
   const navigate = useNavigate()
   const location = useLocation()
   const [searchParams] = useSearchParams()
-  const returnTo = typeof location.state === 'object' && location.state && 'from' in location.state && typeof location.state.from === 'string' ? location.state.from : '/'
+  const returnTo = safeReturnPath(typeof location.state === 'object' && location.state && 'from' in location.state ? location.state.from : '/')
   const [error, setError] = useState('')
   const alert = searchParams.get('alert')
   const [busy, setBusy] = useState(false)
@@ -52,7 +52,7 @@ export function LoginPage() {
           </form>
           <div className="my-5 flex items-center gap-3 text-xs text-muted"><span className="h-px flex-1 bg-border" />OR<span className="h-px flex-1 bg-border" /></div>
           <div className="grid gap-3">
-            <Button variant="secondary" onClick={() => window.location.assign(authUi('login'))}><KeyRound size={17} />Google, OTP, or MFA</Button>
+            <Button variant="secondary" onClick={() => { rememberAuthReturn(returnTo); window.location.assign(authUi('login', new URL(returnTo, window.location.origin).toString())) }}><KeyRound size={17} />Google, OTP, or MFA</Button>
             <Button variant="ghost" disabled={busy} onClick={tryAnonymous}>Try anonymously</Button>
           </div>
         </Card>

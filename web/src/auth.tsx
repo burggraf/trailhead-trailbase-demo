@@ -1,5 +1,6 @@
 /* oxlint-disable react/only-export-components */
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { User } from 'trailbase'
 import { Navigate, useLocation } from 'react-router-dom'
 import { client, onAuthChange } from './lib/trailbase'
@@ -15,17 +16,23 @@ interface AuthState {
 const AuthContext = createContext<AuthState | null>(null)
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const queryClient = useQueryClient()
   const [user, setUser] = useState<User | undefined>(() => client.user())
+  const userId = useRef(user?.id)
   const [ready, setReady] = useState(false)
 
   useEffect(() => {
-    const unsubscribe = onAuthChange(setUser)
+    const unsubscribe = onAuthChange((nextUser) => {
+      if (userId.current && userId.current !== nextUser?.id) queryClient.clear()
+      userId.current = nextUser?.id
+      setUser(nextUser)
+    })
     client.checkCookies().catch(() => undefined).finally(() => {
       setUser(client.user())
       setReady(true)
     })
     return unsubscribe
-  }, [])
+  }, [queryClient])
 
   const value = useMemo<AuthState>(() => ({
     user,
