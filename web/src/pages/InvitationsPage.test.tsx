@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, waitFor } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { AppShell } from '../components/AppShell'
 import { InvitationsPage } from './InvitationsPage'
@@ -24,6 +24,12 @@ vi.mock('../lib/trailbase', () => ({
 function view(node: React.ReactNode, path = '/invitations') {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
   return render(<QueryClientProvider client={queryClient}><MemoryRouter initialEntries={[path]}>{node}</MemoryRouter></QueryClientProvider>)
+}
+
+function CurrentPath() {
+  const location = useLocation()
+  const navigate = useNavigate()
+  return <><span data-testid="path">{location.pathname}</span><button onClick={() => navigate('/')}>Open trips</button></>
 }
 
 const invitation = {
@@ -60,6 +66,27 @@ describe('InvitationsPage', () => {
     expect(await page.findByText('Alpine Escape')).toBeTruthy()
     fireEvent.click(page.getByRole('button', { name: 'Decline' }))
     await waitFor(() => expect(mocks.extension).toHaveBeenCalledWith('/invites/invite-1', { method: 'DELETE' }))
+  })
+
+  it('accepts an invitation by its internal id', async () => {
+    mocks.user = { id: 'user-1', email: 'guest@example.com' }
+    mocks.extension.mockImplementation(async (path: string) => path === '/invites' ? { records: [invitation] } : { trip_id: 'trip-1' })
+    const page = view(<InvitationsPage />)
+
+    fireEvent.click(await page.findByRole('button', { name: 'Accept' }))
+    await waitFor(() => expect(mocks.extension).toHaveBeenCalledWith('/invites/invite-1/accept', { method: 'POST' }))
+  })
+
+  it('redirects once per session and keeps a persistent invitation count', async () => {
+    mocks.user = { id: 'user-1', email: 'guest@example.com' }
+    mocks.extension.mockResolvedValue({ records: [invitation] })
+    const page = view(<AppShell><CurrentPath /></AppShell>, '/')
+    await waitFor(() => expect(page.getByTestId('path').textContent).toBe('/invitations'))
+    fireEvent.click(page.getByRole('button', { name: 'Open trips' }))
+    await waitFor(() => expect(page.getByTestId('path').textContent).toBe('/'))
+    expect(sessionStorage.getItem('trailhead-invitation-redirect:user-1')).toBe('1')
+    const link = page.getByRole('link', { name: /Invitations.*1/ })
+    expect(link.getAttribute('href')).toBe('/invitations')
   })
 
   it('shows a persistent invitation count in the app header', async () => {

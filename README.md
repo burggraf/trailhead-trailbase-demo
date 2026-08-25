@@ -40,7 +40,7 @@ These fixed credentials are migration seed data for local learning only.
 - CRUD, filtering, ordering, cursor-ready lists, views, constraints, and cascades
 - Realtime itinerary, checklist, membership, activity, and weather subscriptions
 - Built-in auth avatars and `std.FileUpload` trip covers
-- One Rust WASM component with six HTTP routes, request user context, SQL transactions, outbound Nominatim/Open-Meteo requests, and two scheduled jobs
+- One Rust WASM component with request user context, SQL transactions, consent-based email invitations, outbound HTTP, and two scheduled jobs
 
 See [`docs/workshop.md`](docs/workshop.md) for the guided tour.
 
@@ -99,12 +99,32 @@ npm --prefix web run build
 trail run --public-dir web/dist --spa
 ```
 
-Set `server.site_url` to that public HTTPS origin. The branded emails load `trailhead-logo-email.png` from it; `dev.sh` serves the same asset locally from `web/public`.
+Set `server.site_url` to that public HTTPS origin. The branded authentication emails load `trailhead-logo-email.png` from it; `dev.sh` serves the same asset locally from `web/public`.
+
+### Resend invitation email
+
+No Resend setup is required in development: invitation messages are posted to Mailpit and appear at <http://localhost:8025>.
+
+For production:
+
+1. Create a Resend account and verify the sending domain.
+2. Create a sending API key.
+3. As an authenticated TrailBase admin, `POST /trailhead/admin/email-settings` with the required CSRF header and:
+
+```json
+{
+  "api_key": "re_...",
+  "from": "Trailhead <trips@example.com>",
+  "app_url": "https://trips.example.com"
+}
+```
+
+The component stores these protected preferences and never returns the API key. The `app_url` must be the HTTPS origin serving the SPA so email recipients arrive at `/invitations`.
 
 ## TrailBase caveats shown intentionally
 
 - JWT auth tokens remain valid until their short expiry even after logout; refresh tokens are revocable.
 - Anonymous users cannot sign in again after losing/revoking their only session. OAuth promotion is not currently supported.
 - Rust guest APIs are still unstable, so `trailbase-wasm` is pinned exactly.
-- Local auth email is captured by Mailpit; use a real SMTP provider in production.
+- Local auth and invitation email is captured by Mailpit; production auth email uses SMTP while invitations use Resend.
 - WASM files are discovered at startup; restart TrailBase after rebuilding a component.

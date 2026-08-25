@@ -431,7 +431,7 @@ async fn refresh_weather_job() -> Result<(), HttpError> {
 
 async fn cleanup_invites_job() -> Result<(), HttpError> {
     execute(
-        "DELETE FROM trip_invites WHERE accepted = 0 AND expires <= UNIXEPOCH()",
+        "DELETE FROM trip_invites WHERE expires <= UNIXEPOCH()",
         [],
     )
     .await

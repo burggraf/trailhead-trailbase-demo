@@ -41,7 +41,7 @@ EXISTS (
 
 Create rules use `_REQ_`; read/delete rules use `_ROW_`; update rules use both plus `_REQ_FIELDS_` to prevent changing tenant and creator columns. ACLs run first, then rules narrow access.
 
-Invite Bob as editor and Carol as viewer. The local demo returns a raw one-time token; only its SHA-256 hash is stored. Acceptance also requires the authenticated account email to match the invitation email. Eve cannot list or read the trip.
+Invite Bob as editor and Carol as viewer. Trailhead sends each person a formatted email through Mailpit and also surfaces the pending invitation in-app. The invitation creates no membership until the authenticated recipient explicitly accepts, and acceptance requires the verified account email to match. Owners can resend, change the proposed role, or cancel before acceptance. Eve cannot list or read the trip.
 
 Run `scripts/authorization-smoke.sh` to exercise all four roles.
 
@@ -81,14 +81,17 @@ SQLite stores metadata while TrailBase stores bytes under `traildepot/uploads/` 
 |---|---|
 | `GET /trailhead/whoami` | request user/security context |
 | `POST /trailhead/trips` | atomic multi-table transaction |
-| `POST /trailhead/trips/{id}/invites` | role check and secure token |
-| `GET /trailhead/invites` | email-bound user query |
-| `POST /trailhead/invites/{token}/accept` | recipient-bound transaction |
+| `POST /trailhead/trips/{id}/invites` | owner check, upsert, and Mailpit/Resend delivery |
+| `GET /trailhead/trips/{id}/invites` | owner-only pending invitation management |
+| `GET /trailhead/invites` | verified-email-bound recipient query |
+| `POST /trailhead/invites/{id}/accept` | consent and membership transaction |
+| `DELETE /trailhead/invites/{id}` | explicit recipient decline |
+| invitation resend/cancel routes | owner authorization and revocation |
 | `POST /trailhead/trips/{id}/briefing` | membership, outbound HTTP, DB upsert |
 | hourly weather job | system context and bounded batch work |
 | daily invite cleanup | scheduled maintenance |
 
-The component calls Nominatim with an identifying User-Agent, then Open-Meteo. Provider failures leave the previous briefing intact. Jobs have no request user, so their SQL is deliberately narrow.
+The component calls Mailpit locally or Resend when protected production settings exist. Delivery failure leaves the invitation available in-app for manual resend. It also calls Nominatim with an identifying User-Agent, then Open-Meteo; weather-provider failures leave the previous briefing intact. Jobs have no request user, so their SQL is deliberately narrow.
 
 Rebuild manually with:
 
@@ -118,5 +121,5 @@ Restart TrailBase afterward. `./dev.sh` performs this when source files are newe
 - Export OpenAPI with `trail openapi`.
 - Add an S3 object-store configuration.
 - Add a read-only public trip view as a separate Record API rather than weakening private rules.
-- Replace local invitation-token handoff with an email API in the extension.
+- Configure a verified Resend sender and inspect production delivery events.
 - Validate TrailBase JWTs from a second service using the public key.
