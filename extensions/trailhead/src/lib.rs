@@ -4,7 +4,6 @@ use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE;
 use serde::Deserialize;
 use serde_json::{Value as JsonValue, json};
-use sha2::{Digest, Sha256};
 use trailbase_wasm::db::{Transaction, Value, execute, query};
 use trailbase_wasm::fetch;
 use trailbase_wasm::http::{HttpError, HttpRoute, Json, Request, StatusCode, routing};
@@ -20,8 +19,18 @@ impl Guest for Trailhead {
             routing::get("/trailhead/whoami", whoami),
             routing::post("/trailhead/trips", create_trip),
             routing::post("/trailhead/trips/{id}/invites", create_invite),
+            routing::get("/trailhead/trips/{id}/invites", owner_invites),
+            routing::post(
+                "/trailhead/trips/{id}/invites/{invite_id}/resend",
+                resend_invite,
+            ),
+            routing::delete(
+                "/trailhead/trips/{id}/invites/{invite_id}",
+                cancel_invite,
+            ),
             routing::get("/trailhead/invites", pending_invites),
-            routing::post("/trailhead/invites/{token}/accept", accept_invite),
+            routing::post("/trailhead/invites/{id}/accept", accept_invite),
+            routing::delete("/trailhead/invites/{id}", decline_invite),
             routing::post("/trailhead/trips/{id}/briefing", create_briefing),
         ]
     }
@@ -110,43 +119,90 @@ async fn create_invite(mut req: Request) -> Result<Json<JsonValue>, HttpError> {
 
     let mut tx = Transaction::begin().map_err(internal)?;
     require_role(&mut tx, &trip_id, &user_id, "owner")?;
-    let token = random_token(&mut tx)?;
-    let token_hash = hash_token(&token);
+    if !tx
+        .query(
+            "SELECT 1 FROM trip_members m JOIN _user u ON u.id = m.user_id WHERE m.trip_id = ?1 AND lower(u.email) = lower(?2) LIMIT 1",
+            &[Value::Blob(trip_id.clone()), Value::Text(email.clone())],
+        )
+        .map_err(internal)?
+        .is_empty()
+    {
+        return Err(HttpError::message(
+            StatusCode::CONFLICT,
+            "this person is already a trip member",
+        ));
+    }
     tx.execute(
-    "INSERT INTO trip_invites (trip_id, inviter, email, role, token_hash, expires) VALUES (?1, ?2, ?3, ?4, ?5, UNIXEPOCH() + 604800)",
-    &[
-      Value::Blob(trip_id),
-      Value::Blob(user_id),
-      Value::Text(email),
-      Value::Text(body.role),
-      Value::Text(token_hash),
-    ],
-  ).map_err(internal)?;
+        "INSERT INTO trip_invites (trip_id, inviter, email, role, expires) VALUES (?1, ?2, ?3, ?4, UNIXEPOCH() + 604800) ON CONFLICT(trip_id, email) DO UPDATE SET inviter = excluded.inviter, role = excluded.role, expires = excluded.expires, email_status = 'pending', last_sent = NULL",
+        &[
+            Value::Blob(trip_id.clone()),
+            Value::Blob(user_id),
+            Value::Text(email.clone()),
+            Value::Text(body.role),
+        ],
+    )
+    .map_err(internal)?;
+    let rows = tx
+        .query(
+            "SELECT id FROM trip_invites WHERE trip_id = ?1 AND email = ?2",
+            &[Value::Blob(trip_id), Value::Text(email)],
+        )
+        .map_err(internal)?;
+    let invite_id = blob(
+        rows.first()
+            .and_then(|row| row.first())
+            .ok_or_else(|| internal("missing invitation"))?,
+    )?;
     tx.commit().map_err(internal)?;
-    Ok(Json(json!({"token": token, "expires_in": 604800})))
+    Ok(Json(json!({"id": encode_id(&invite_id), "delivery": "pending"})))
 }
 
 async fn pending_invites(req: Request) -> Result<Json<JsonValue>, HttpError> {
-    let user = authenticated(&req)?;
-    let email = user
-        .email
-        .as_deref()
-        .ok_or_else(|| bad_request("account has no email"))?;
+    let email = account_email(&req)?;
     let rows = query(
-    "SELECT i.id, i.trip_id, t.title, t.destination, i.role, i.expires FROM trip_invites i JOIN trips t ON t.id = i.trip_id WHERE lower(i.email) = lower(?1) AND i.accepted = 0 AND i.expires > UNIXEPOCH() ORDER BY i.created DESC",
-    [Value::Text(email.to_string())],
-  ).await.map_err(internal)?;
+        "SELECT i.id, i.trip_id, t.title, t.destination, i.role, i.expires, CAST(COALESCE(p.display_name, u.username, u.email, 'A traveler') AS TEXT) FROM trip_invites i JOIN trips t ON t.id = i.trip_id JOIN _user u ON u.id = i.inviter LEFT JOIN profiles p ON p.user = i.inviter WHERE i.email = ?1 AND i.expires > UNIXEPOCH() ORDER BY i.created DESC",
+        [Value::Text(email.to_string())],
+    )
+    .await
+    .map_err(internal)?;
     let mut records = Vec::with_capacity(rows.len());
     for row in &rows {
         records.push(json!({
-          "id": encode_id(&blob(row.first().ok_or_else(|| internal("invalid invite row"))?)?),
-          "trip_id": encode_id(&blob(row.get(1).ok_or_else(|| internal("invalid invite row"))?)?),
-          "trip_title": text(row.get(2).ok_or_else(|| internal("invalid invite row"))?)?,
-          "destination": text(row.get(3).ok_or_else(|| internal("invalid invite row"))?)?,
-          "role": text(row.get(4).ok_or_else(|| internal("invalid invite row"))?)?,
-          "expires": integer(row.get(5).ok_or_else(|| internal("invalid invite row"))?)?,
+            "id": encode_id(&blob(row.first().ok_or_else(|| internal("invalid invite row"))?)?),
+            "trip_id": encode_id(&blob(row.get(1).ok_or_else(|| internal("invalid invite row"))?)?),
+            "trip_title": text(row.get(2).ok_or_else(|| internal("invalid invite row"))?)?,
+            "destination": text(row.get(3).ok_or_else(|| internal("invalid invite row"))?)?,
+            "role": text(row.get(4).ok_or_else(|| internal("invalid invite row"))?)?,
+            "expires": integer(row.get(5).ok_or_else(|| internal("invalid invite row"))?)?,
+            "inviter_name": text(row.get(6).ok_or_else(|| internal("invalid invite row"))?)?,
         }));
     }
+    Ok(Json(json!({"records": records})))
+}
+
+async fn owner_invites(req: Request) -> Result<Json<JsonValue>, HttpError> {
+    let user_id = user_blob(&req)?;
+    let trip_id = path_blob(&req, "id")?;
+    let mut tx = Transaction::begin().map_err(internal)?;
+    require_role(&mut tx, &trip_id, &user_id, "owner")?;
+    let rows = tx
+        .query(
+            "SELECT id, email, role, expires, email_status, last_sent FROM trip_invites WHERE trip_id = ?1 AND expires > UNIXEPOCH() ORDER BY created DESC",
+            &[Value::Blob(trip_id)],
+        )
+        .map_err(internal)?;
+    let mut records = Vec::with_capacity(rows.len());
+    for row in &rows {
+        records.push(json!({
+            "id": encode_id(&blob(row.first().ok_or_else(|| internal("invalid invite row"))?)?),
+            "email": text(row.get(1).ok_or_else(|| internal("invalid invite row"))?)?,
+            "role": text(row.get(2).ok_or_else(|| internal("invalid invite row"))?)?,
+            "expires": integer(row.get(3).ok_or_else(|| internal("invalid invite row"))?)?,
+            "email_status": text(row.get(4).ok_or_else(|| internal("invalid invite row"))?)?,
+            "last_sent": optional_integer(row.get(5).ok_or_else(|| internal("invalid invite row"))?)?,
+        }));
+    }
+    tx.commit().map_err(internal)?;
     Ok(Json(json!({"records": records})))
 }
 
@@ -156,36 +212,94 @@ async fn accept_invite(req: Request) -> Result<Json<JsonValue>, HttpError> {
     let email = user
         .email
         .as_deref()
-        .ok_or_else(|| bad_request("account has no email"))?;
-    let token = req
-        .path_param("token")
-        .ok_or_else(|| bad_request("missing token"))?;
+        .ok_or_else(|| bad_request("account has no verified email"))?;
+    let invite_id = path_blob(&req, "id")?;
     let mut tx = Transaction::begin().map_err(internal)?;
-    let rows = tx.query(
-    "SELECT id, trip_id, role FROM trip_invites WHERE token_hash = ?1 AND lower(email) = lower(?2) AND accepted = 0 AND expires > UNIXEPOCH() LIMIT 1",
-    &[Value::Text(hash_token(token)), Value::Text(email.to_string())],
-  ).map_err(internal)?;
+    let rows = tx
+        .query(
+            "SELECT trip_id, role FROM trip_invites WHERE id = ?1 AND email = ?2 AND expires > UNIXEPOCH() LIMIT 1",
+            &[Value::Blob(invite_id.clone()), Value::Text(email.to_string())],
+        )
+        .map_err(internal)?;
     let row = rows
         .first()
         .ok_or_else(|| HttpError::message(StatusCode::NOT_FOUND, "invite not found or expired"))?;
-    let invite_id = blob(row.first().ok_or_else(|| internal("invalid invite"))?)?;
-    let trip_id = blob(row.get(1).ok_or_else(|| internal("invalid invite"))?)?;
-    let role = text(row.get(2).ok_or_else(|| internal("invalid invite"))?)?.to_string();
+    let trip_id = blob(row.first().ok_or_else(|| internal("invalid invite"))?)?;
+    let role = text(row.get(1).ok_or_else(|| internal("invalid invite"))?)?.to_string();
     tx.execute(
-    "INSERT INTO trip_members (trip_id, user_id, role) VALUES (?1, ?2, ?3) ON CONFLICT(trip_id, user_id) DO NOTHING",
-    &[Value::Blob(trip_id.clone()), Value::Blob(user_id.clone()), Value::Text(role)],
-  ).map_err(internal)?;
+        "INSERT INTO trip_members (trip_id, user_id, role) VALUES (?1, ?2, ?3) ON CONFLICT(trip_id, user_id) DO NOTHING",
+        &[
+            Value::Blob(trip_id.clone()),
+            Value::Blob(user_id.clone()),
+            Value::Text(role),
+        ],
+    )
+    .map_err(internal)?;
     tx.execute(
-        "UPDATE trip_invites SET accepted = 1 WHERE id = ?1",
+        "DELETE FROM trip_invites WHERE id = ?1",
         &[Value::Blob(invite_id)],
     )
     .map_err(internal)?;
     tx.execute(
-    "INSERT INTO activity_events (trip_id, actor, kind, summary) VALUES (?1, ?2, 'member_joined', 'Joined the trip')",
-    &[Value::Blob(trip_id.clone()), Value::Blob(user_id)],
-  ).map_err(internal)?;
+        "INSERT INTO activity_events (trip_id, actor, kind, summary) VALUES (?1, ?2, 'member_joined', 'Joined the trip')",
+        &[Value::Blob(trip_id.clone()), Value::Blob(user_id)],
+    )
+    .map_err(internal)?;
     tx.commit().map_err(internal)?;
     Ok(Json(json!({"trip_id": encode_id(&trip_id)})))
+}
+
+async fn decline_invite(req: Request) -> Result<Json<JsonValue>, HttpError> {
+    let email = account_email(&req)?;
+    let invite_id = path_blob(&req, "id")?;
+    let affected = execute(
+        "DELETE FROM trip_invites WHERE id = ?1 AND email = ?2 AND expires > UNIXEPOCH()",
+        [Value::Blob(invite_id), Value::Text(email.to_string())],
+    )
+    .await
+    .map_err(internal)?;
+    if affected == 0 {
+        return Err(HttpError::message(StatusCode::NOT_FOUND, "invite not found or expired"));
+    }
+    Ok(Json(json!({"declined": true})))
+}
+
+async fn resend_invite(req: Request) -> Result<Json<JsonValue>, HttpError> {
+    let user_id = user_blob(&req)?;
+    let trip_id = path_blob(&req, "id")?;
+    let invite_id = path_blob(&req, "invite_id")?;
+    let mut tx = Transaction::begin().map_err(internal)?;
+    require_role(&mut tx, &trip_id, &user_id, "owner")?;
+    let affected = tx
+        .execute(
+            "UPDATE trip_invites SET expires = UNIXEPOCH() + 604800, email_status = 'pending', last_sent = NULL WHERE id = ?1 AND trip_id = ?2",
+            &[Value::Blob(invite_id.clone()), Value::Blob(trip_id)],
+        )
+        .map_err(internal)?;
+    if affected == 0 {
+        return Err(HttpError::message(StatusCode::NOT_FOUND, "invite not found"));
+    }
+    tx.commit().map_err(internal)?;
+    Ok(Json(json!({"id": encode_id(&invite_id), "delivery": "pending"})))
+}
+
+async fn cancel_invite(req: Request) -> Result<Json<JsonValue>, HttpError> {
+    let user_id = user_blob(&req)?;
+    let trip_id = path_blob(&req, "id")?;
+    let invite_id = path_blob(&req, "invite_id")?;
+    let mut tx = Transaction::begin().map_err(internal)?;
+    require_role(&mut tx, &trip_id, &user_id, "owner")?;
+    let affected = tx
+        .execute(
+            "DELETE FROM trip_invites WHERE id = ?1 AND trip_id = ?2",
+            &[Value::Blob(invite_id), Value::Blob(trip_id)],
+        )
+        .map_err(internal)?;
+    if affected == 0 {
+        return Err(HttpError::message(StatusCode::NOT_FOUND, "invite not found"));
+    }
+    tx.commit().map_err(internal)?;
+    Ok(Json(json!({"cancelled": true})))
 }
 
 async fn create_briefing(req: Request) -> Result<Json<JsonValue>, HttpError> {
@@ -343,6 +457,13 @@ fn user_blob(req: &Request) -> Result<Vec<u8>, HttpError> {
     decode_id(&authenticated(req)?.id)
 }
 
+fn account_email(req: &Request) -> Result<&str, HttpError> {
+    authenticated(req)?
+        .email
+        .as_deref()
+        .ok_or_else(|| bad_request("account has no verified email"))
+}
+
 fn path_blob(req: &Request, name: &str) -> Result<Vec<u8>, HttpError> {
     let value = req
         .path_param(name)
@@ -371,18 +492,6 @@ fn generated_uuid(tx: &mut Transaction) -> Result<Vec<u8>, HttpError> {
     )
 }
 
-fn random_token(tx: &mut Transaction) -> Result<String, HttpError> {
-    let rows = tx
-        .query("SELECT lower(hex(randomblob(32)))", &[])
-        .map_err(internal)?;
-    Ok(text(
-        rows.first()
-            .and_then(|row| row.first())
-            .ok_or_else(|| internal("token generation failed"))?,
-    )?
-    .to_string())
-}
-
 fn require_role(
     tx: &mut Transaction,
     trip_id: &[u8],
@@ -408,10 +517,6 @@ fn require_role(
     Ok(())
 }
 
-fn hash_token(token: &str) -> String {
-    format!("{:x}", Sha256::digest(token.as_bytes()))
-}
-
 fn blob(value: &Value) -> Result<Vec<u8>, HttpError> {
     match value {
         Value::Blob(value) => Ok(value.clone()),
@@ -430,6 +535,14 @@ fn integer(value: &Value) -> Result<i64, HttpError> {
     match value {
         Value::Integer(value) => Ok(*value),
         _ => Err(internal("expected integer")),
+    }
+}
+
+fn optional_integer(value: &Value) -> Result<Option<i64>, HttpError> {
+    match value {
+        Value::Integer(value) => Ok(Some(*value)),
+        Value::Null => Ok(None),
+        _ => Err(internal("expected optional integer")),
     }
 }
 
@@ -465,14 +578,6 @@ fn internal(err: impl std::string::ToString) -> HttpError {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn token_hash_is_stable_and_not_plaintext() {
-        let hash = hash_token("invite-token");
-        assert_eq!(hash.len(), 64);
-        assert_ne!(hash, "invite-token");
-        assert_eq!(hash, hash_token("invite-token"));
-    }
 
     #[test]
     fn ids_round_trip() {
