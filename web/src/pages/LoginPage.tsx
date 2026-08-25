@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { KeyRound } from 'lucide-react'
-import { Navigate, useNavigate, useSearchParams } from 'react-router-dom'
+import { Navigate, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../auth'
 import { Button, Card, Field, Input } from '../components/ui'
 import { authUi } from '../lib/trailbase'
@@ -9,11 +9,13 @@ import { message } from '../lib/api'
 export function LoginPage() {
   const { user, login, anonymous } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
   const [searchParams] = useSearchParams()
+  const returnTo = typeof location.state === 'object' && location.state && 'from' in location.state && typeof location.state.from === 'string' ? location.state.from : '/'
   const [error, setError] = useState('')
   const alert = searchParams.get('alert')
   const [busy, setBusy] = useState(false)
-  if (user) return <Navigate to="/" replace />
+  if (user) return <Navigate to={returnTo} replace />
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -21,13 +23,13 @@ export function LoginPage() {
     setBusy(true); setError('')
     try {
       await login(String(data.get('email')), String(data.get('password')))
-      navigate('/')
+      navigate(returnTo)
     } catch (err) { setError(message(err)) } finally { setBusy(false) }
   }
 
   const tryAnonymous = async () => {
     setBusy(true); setError('')
-    try { await anonymous(); navigate('/') } catch (err) { setError(message(err)) } finally { setBusy(false) }
+    try { await anonymous(); navigate(returnTo) } catch (err) { setError(message(err)) } finally { setBusy(false) }
   }
 
   return <main className="grid min-h-screen lg:grid-cols-[1.05fr_.95fr]">
@@ -50,7 +52,7 @@ export function LoginPage() {
           </form>
           <div className="my-5 flex items-center gap-3 text-xs text-muted"><span className="h-px flex-1 bg-border" />OR<span className="h-px flex-1 bg-border" /></div>
           <div className="grid gap-3">
-            <Button variant="secondary" onClick={() => location.assign(authUi('login'))}><KeyRound size={17} />Google, OTP, or MFA</Button>
+            <Button variant="secondary" onClick={() => window.location.assign(authUi('login'))}><KeyRound size={17} />Google, OTP, or MFA</Button>
             <Button variant="ghost" disabled={busy} onClick={tryAnonymous}>Try anonymously</Button>
           </div>
         </Card>

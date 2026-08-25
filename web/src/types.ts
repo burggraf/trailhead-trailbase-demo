@@ -82,6 +82,7 @@ export interface PendingInvite {
   trip_id: string
   trip_title: string
   destination: string
+  inviter_name: string
   role: Exclude<TripRole, 'owner'>
   expires: number
 }

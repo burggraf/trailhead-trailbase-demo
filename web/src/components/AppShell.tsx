@@ -1,16 +1,29 @@
-import { BookOpen, LogOut, Map, Moon, Settings, Sun, UserRound } from 'lucide-react'
+import { BookOpen, LogOut, Mail, Map, Moon, Settings, Sun, UserRound } from 'lucide-react'
+import { useQuery } from '@tanstack/react-query'
 import { useEffect, useState, type ReactNode } from 'react'
-import { NavLink, useNavigate } from 'react-router-dom'
+import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth'
 import { AuthenticatedImage } from './AuthenticatedImage'
 import { Button } from './ui'
-import { client } from '../lib/trailbase'
+import { client, extension } from '../lib/trailbase'
+import type { PendingInvite } from '../types'
 
 export function AppShell({ children }: { children: ReactNode }) {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
-  const [dark, setDark] = useState(() => localStorage.theme === 'dark' || (!('theme' in localStorage) && matchMedia('(prefers-color-scheme: dark)').matches))
-  useEffect(() => { document.documentElement.classList.toggle('dark', dark); localStorage.theme = dark ? 'dark' : 'light' }, [dark])
+  const location = useLocation()
+  const invitations = useQuery({ queryKey: ['invites'], queryFn: async () => (await extension<{ records: PendingInvite[] }>('/invites')).records, enabled: !!user?.email })
+  const [dark, setDark] = useState(() => { try { return window.localStorage.theme === 'dark' || (!('theme' in window.localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches) } catch { return false } })
+  useEffect(() => { document.documentElement.classList.toggle('dark', dark); try { window.localStorage.theme = dark ? 'dark' : 'light' } catch { /* keep the in-memory preference */ } }, [dark])
+  useEffect(() => {
+    if (!user || !invitations.data?.length || location.pathname === '/invitations') return
+    const key = `trailhead-invitation-redirect:${user.id}`
+    try {
+      if (sessionStorage.getItem(key)) return
+      sessionStorage.setItem(key, '1')
+    } catch { /* redirect still works when session storage is unavailable */ }
+    navigate('/invitations')
+  }, [invitations.data, location.pathname, navigate, user])
   const avatar = user ? client.avatarUrl(user.id) : undefined
 
   return <div className="min-h-screen bg-canvas">
@@ -21,6 +34,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <NavLink to="/" end className="nav-link"><Map size={17} />Trips</NavLink>
           <NavLink to="/learn" className="nav-link"><BookOpen size={17} />Learn</NavLink>
         </nav>
+        <NavLink to="/invitations" aria-label={`Invitations ${invitations.data?.length ?? 0}`} className="relative inline-flex min-h-10 items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold text-white/75 hover:bg-white/10 hover:text-white"><Mail size={18} /><span className="hidden md:inline">Invitations</span>{!!invitations.data?.length && <span className="grid min-w-5 place-items-center rounded-full bg-amber-400 px-1 text-xs font-black text-forest">{invitations.data.length}</span>}</NavLink>
         <Button variant="ghost" className="size-10 px-0 text-white/75 hover:bg-white/10 hover:text-white" aria-label="Toggle dark mode" onClick={() => setDark(!dark)}>{dark ? <Sun size={18} /> : <Moon size={18} />}</Button>
         <div className="group relative">
           <button className="flex items-center gap-2 rounded-xl p-1.5 hover:bg-white/10" aria-label="Account menu">

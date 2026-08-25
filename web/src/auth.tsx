@@ -51,6 +51,6 @@ export function Protected({ children }: { children: ReactNode }) {
   const { ready, user } = useAuth()
   const location = useLocation()
   if (!ready) return <div className="grid min-h-screen place-items-center text-sm text-muted">Connecting to TrailBase…</div>
-  if (!user) return <Navigate to={`/login${location.search}`} replace state={{ from: location.pathname }} />
+  if (!user) return <Navigate to={`/login${location.search}`} replace state={{ from: `${location.pathname}${location.search}` }} />
   return children
 }

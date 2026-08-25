@@ -1,10 +1,11 @@
 import { useEffect } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BrowserRouter, Navigate, Route, Routes, useNavigate } from 'react-router-dom'
-import { AuthProvider, Protected } from './auth'
+import { AuthProvider, Protected, useAuth } from './auth'
 import { AppShell } from './components/AppShell'
 import { client } from './lib/trailbase'
 import { DashboardPage } from './pages/DashboardPage'
+import { InvitationsPage } from './pages/InvitationsPage'
 import { LearnPage } from './pages/LearnPage'
 import { LoginPage } from './pages/LoginPage'
 import { ProfilePage } from './pages/ProfilePage'
@@ -23,10 +24,17 @@ function PrivatePage({ children }: { children: React.ReactNode }) {
   return <Protected><AppShell>{children}</AppShell></Protected>
 }
 
+function InvitationRoute() {
+  const { ready, user } = useAuth()
+  if (!ready) return <div className="grid min-h-screen place-items-center text-sm text-muted">Connecting to TrailBase…</div>
+  return user ? <AppShell><InvitationsPage /></AppShell> : <InvitationsPage />
+}
+
 export default function App() {
   return <QueryClientProvider client={queryClient}><BrowserRouter><AuthProvider><Routes>
     <Route path="/login" element={<LoginPage />} />
     <Route path="/auth/callback" element={<AuthCallback />} />
+    <Route path="/invitations" element={<InvitationRoute />} />
     <Route path="/" element={<PrivatePage><DashboardPage /></PrivatePage>} />
     <Route path="/trips/:tripId" element={<PrivatePage><TripPage /></PrivatePage>} />
     <Route path="/profile" element={<PrivatePage><ProfilePage /></PrivatePage>} />
