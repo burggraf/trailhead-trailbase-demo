@@ -3,9 +3,11 @@ set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BASE="${TRAILBASE_URL:-http://localhost:4000}"
+MAILPIT="${MAILPIT_URL:-http://localhost:8025}"
 cd "$ROOT"
 
 curl -fsS "$BASE/api/healthcheck" >/dev/null || { echo "TrailBase is not running at $BASE" >&2; exit 1; }
+curl -fsS "$MAILPIT/readyz" >/dev/null || { echo "Mailpit is not running at $MAILPIT" >&2; exit 1; }
 
 mint() {
   trail --depot=traildepot user mint "$1" 2>&1 | sed -n 's/^auth: "Bearer \(.*\)"$/\1/p' | head -1
@@ -28,6 +30,7 @@ request() {
 ALICE="$(mint alice@example.com)"; BOB="$(mint bob@example.com)"; CAROL="$(mint carol@example.com)"; EVE="$(mint eve@example.com)"
 [[ -n "$ALICE" && -n "$BOB" && -n "$CAROL" && -n "$EVE" ]] || { echo "Workshop users are missing; restart TrailBase to apply migrations" >&2; exit 1; }
 ALICE_ID="$(sub "$ALICE")"
+BOB_MAIL_BEFORE="$(curl -fsSG --data-urlencode 'query=to:bob@example.com' "$MAILPIT/api/v1/search" | json '["total"]')"
 
 TRIP="$(request "$ALICE" POST /trailhead/trips "{\"title\":\"Authorization smoke $(date +%s)\",\"destination\":\"Innsbruck, Austria\",\"start_date\":\"2026-10-01\",\"end_date\":\"2026-10-04\",\"status\":\"planning\",\"notes\":\"temporary smoke-test trip\"}" | json '["id"]')"
 
@@ -35,6 +38,12 @@ BOB_INVITE="$(request "$ALICE" POST "/trailhead/trips/$TRIP/invites" '{"email":"
 CAROL_INVITE="$(request "$ALICE" POST "/trailhead/trips/$TRIP/invites" '{"email":"carol@example.com","role":"viewer"}' | json '["id"]')"
 OWNER_INVITE_COUNT="$(request "$ALICE" GET "/trailhead/trips/$TRIP/invites" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["records"]))')"
 [[ "$OWNER_INVITE_COUNT" == 2 ]] || { echo "Expected two pending owner invitations" >&2; exit 1; }
+BOB_MAIL_SEARCH="$(curl -fsSG --data-urlencode 'query=to:bob@example.com' "$MAILPIT/api/v1/search")"
+BOB_MAIL_AFTER="$(printf '%s' "$BOB_MAIL_SEARCH" | json '["total"]')"
+((BOB_MAIL_AFTER > BOB_MAIL_BEFORE)) || { echo "Expected a new invitation email for Bob" >&2; exit 1; }
+BOB_MAIL_ID="$(printf '%s' "$BOB_MAIL_SEARCH" | json '["messages"][0]["ID"]')"
+BOB_MAIL_HTML="$(curl -fsS "$MAILPIT/api/v1/message/$BOB_MAIL_ID" | json '["HTML"]')"
+grep -q 'http://localhost:5173/invitations' <<<"$BOB_MAIL_HTML" || { echo "Invitation email is missing the app link" >&2; exit 1; }
 request "$BOB" POST "/trailhead/invites/$BOB_INVITE/accept" >/dev/null
 request "$CAROL" POST "/trailhead/invites/$CAROL_INVITE/accept" >/dev/null
 

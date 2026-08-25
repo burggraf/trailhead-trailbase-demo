@@ -2,21 +2,27 @@
 
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value as JsonValue, json};
 use trailbase_wasm::db::{Transaction, Value, execute, query};
 use trailbase_wasm::fetch;
 use trailbase_wasm::http::{HttpError, HttpRoute, Json, Request, StatusCode, routing};
 use trailbase_wasm::job::Job;
-use trailbase_wasm::{Guest, export};
+use trailbase_wasm::{Guest, export, prefs};
 use wstd::http::body::IntoBody;
 
 struct Trailhead;
+
+const EMAIL_SETTINGS_KEY: &str = "resend-email-settings";
+const DEV_APP_URL: &str = "http://localhost:5173";
+const MAILPIT_SEND_URL: &str = "http://localhost:8025/api/v1/send";
 
 impl Guest for Trailhead {
     fn http_handlers() -> Vec<HttpRoute> {
         vec![
             routing::get("/trailhead/whoami", whoami),
+            routing::get("/trailhead/admin/email-settings", get_email_settings).require_admin(),
+            routing::post("/trailhead/admin/email-settings", set_email_settings).require_admin(),
             routing::post("/trailhead/trips", create_trip),
             routing::post("/trailhead/trips/{id}/invites", create_invite),
             routing::get("/trailhead/trips/{id}/invites", owner_invites),
@@ -24,10 +30,7 @@ impl Guest for Trailhead {
                 "/trailhead/trips/{id}/invites/{invite_id}/resend",
                 resend_invite,
             ),
-            routing::delete(
-                "/trailhead/trips/{id}/invites/{invite_id}",
-                cancel_invite,
-            ),
+            routing::delete("/trailhead/trips/{id}/invites/{invite_id}", cancel_invite),
             routing::get("/trailhead/invites", pending_invites),
             routing::post("/trailhead/invites/{id}/accept", accept_invite),
             routing::delete("/trailhead/invites/{id}", decline_invite),
@@ -63,6 +66,24 @@ struct NewInvite {
     role: String,
 }
 
+#[derive(Deserialize, Serialize)]
+struct EmailSettings {
+    api_key: String,
+    from: String,
+    app_url: String,
+}
+
+struct InviteEmail {
+    id: Vec<u8>,
+    email: String,
+    role: String,
+    trip_title: String,
+    destination: String,
+    inviter_name: String,
+    account_state: String,
+    expires: i64,
+}
+
 async fn whoami(req: Request) -> Result<Json<JsonValue>, HttpError> {
     let user = authenticated(&req)?;
     Ok(Json(json!({
@@ -70,6 +91,47 @@ async fn whoami(req: Request) -> Result<Json<JsonValue>, HttpError> {
       "email": user.email,
       "username": user.username,
     })))
+}
+
+async fn get_email_settings(_req: Request) -> Result<Json<JsonValue>, HttpError> {
+    let settings = read_email_settings().await?;
+    Ok(Json(match settings {
+        Some(settings) => json!({
+            "configured": true,
+            "from": settings.from,
+            "app_url": settings.app_url,
+        }),
+        None => json!({
+            "configured": false,
+            "from": "Trailhead <noreply@trailhead.test>",
+            "app_url": "http://localhost:5173",
+        }),
+    }))
+}
+
+async fn set_email_settings(mut req: Request) -> Result<Json<JsonValue>, HttpError> {
+    let settings: EmailSettings = req.body().json().await.map_err(bad_request)?;
+    if settings.api_key.trim().is_empty() {
+        prefs::set_prefs(EMAIL_SETTINGS_KEY, None::<String>)
+            .await
+            .map_err(internal)?;
+        return Ok(Json(json!({"configured": false})));
+    }
+    if !settings.from.contains('@')
+        || !settings.app_url.starts_with("https://")
+        || settings.app_url.ends_with('/')
+    {
+        return Err(bad_request(
+            "from must contain an email and app_url must be an HTTPS origin without a trailing slash",
+        ));
+    }
+    prefs::set_prefs(
+        EMAIL_SETTINGS_KEY,
+        Some(serde_json::to_string(&settings).map_err(internal)?),
+    )
+    .await
+    .map_err(internal)?;
+    Ok(Json(json!({"configured": true})))
 }
 
 async fn create_trip(mut req: Request) -> Result<Json<JsonValue>, HttpError> {
@@ -144,17 +206,16 @@ async fn create_invite(mut req: Request) -> Result<Json<JsonValue>, HttpError> {
     .map_err(internal)?;
     let rows = tx
         .query(
-            "SELECT id FROM trip_invites WHERE trip_id = ?1 AND email = ?2",
+            "SELECT i.id, i.email, i.role, t.title, t.destination, CAST(COALESCE(p.display_name, u.username, u.email, 'A traveler') AS TEXT), CASE WHEN EXISTS(SELECT 1 FROM _user account WHERE account.email = i.email) THEN 'verified' WHEN EXISTS(SELECT 1 FROM _user account WHERE account.unverified_email = i.email) THEN 'unverified' ELSE 'new' END, i.expires FROM trip_invites i JOIN trips t ON t.id = i.trip_id JOIN _user u ON u.id = i.inviter LEFT JOIN profiles p ON p.user = i.inviter WHERE i.trip_id = ?1 AND i.email = ?2",
             &[Value::Blob(trip_id), Value::Text(email)],
         )
         .map_err(internal)?;
-    let invite_id = blob(
-        rows.first()
-            .and_then(|row| row.first())
-            .ok_or_else(|| internal("missing invitation"))?,
-    )?;
+    let invite = invite_email(rows.first().ok_or_else(|| internal("missing invitation"))?)?;
     tx.commit().map_err(internal)?;
-    Ok(Json(json!({"id": encode_id(&invite_id), "delivery": "pending"})))
+    let delivery = deliver_and_record(&invite).await;
+    Ok(Json(
+        json!({"id": encode_id(&invite.id), "delivery": delivery}),
+    ))
 }
 
 async fn pending_invites(req: Request) -> Result<Json<JsonValue>, HttpError> {
@@ -259,7 +320,10 @@ async fn decline_invite(req: Request) -> Result<Json<JsonValue>, HttpError> {
     .await
     .map_err(internal)?;
     if affected == 0 {
-        return Err(HttpError::message(StatusCode::NOT_FOUND, "invite not found or expired"));
+        return Err(HttpError::message(
+            StatusCode::NOT_FOUND,
+            "invite not found or expired",
+        ));
     }
     Ok(Json(json!({"declined": true})))
 }
@@ -277,10 +341,23 @@ async fn resend_invite(req: Request) -> Result<Json<JsonValue>, HttpError> {
         )
         .map_err(internal)?;
     if affected == 0 {
-        return Err(HttpError::message(StatusCode::NOT_FOUND, "invite not found"));
+        return Err(HttpError::message(
+            StatusCode::NOT_FOUND,
+            "invite not found",
+        ));
     }
+    let rows = tx
+        .query(
+            "SELECT i.id, i.email, i.role, t.title, t.destination, CAST(COALESCE(p.display_name, u.username, u.email, 'A traveler') AS TEXT), CASE WHEN EXISTS(SELECT 1 FROM _user account WHERE account.email = i.email) THEN 'verified' WHEN EXISTS(SELECT 1 FROM _user account WHERE account.unverified_email = i.email) THEN 'unverified' ELSE 'new' END, i.expires FROM trip_invites i JOIN trips t ON t.id = i.trip_id JOIN _user u ON u.id = i.inviter LEFT JOIN profiles p ON p.user = i.inviter WHERE i.id = ?1",
+            &[Value::Blob(invite_id)],
+        )
+        .map_err(internal)?;
+    let invite = invite_email(rows.first().ok_or_else(|| internal("missing invitation"))?)?;
     tx.commit().map_err(internal)?;
-    Ok(Json(json!({"id": encode_id(&invite_id), "delivery": "pending"})))
+    let delivery = deliver_and_record(&invite).await;
+    Ok(Json(
+        json!({"id": encode_id(&invite.id), "delivery": delivery}),
+    ))
 }
 
 async fn cancel_invite(req: Request) -> Result<Json<JsonValue>, HttpError> {
@@ -296,7 +373,10 @@ async fn cancel_invite(req: Request) -> Result<Json<JsonValue>, HttpError> {
         )
         .map_err(internal)?;
     if affected == 0 {
-        return Err(HttpError::message(StatusCode::NOT_FOUND, "invite not found"));
+        return Err(HttpError::message(
+            StatusCode::NOT_FOUND,
+            "invite not found",
+        ));
     }
     tx.commit().map_err(internal)?;
     Ok(Json(json!({"cancelled": true})))
@@ -448,6 +528,198 @@ async fn store_briefing(
     Ok(())
 }
 
+async fn read_email_settings() -> Result<Option<EmailSettings>, HttpError> {
+    prefs::get_prefs(EMAIL_SETTINGS_KEY)
+        .await
+        .map_err(internal)?
+        .map(|value| serde_json::from_str(&value).map_err(internal))
+        .transpose()
+}
+
+fn invite_email(row: &[Value]) -> Result<InviteEmail, HttpError> {
+    Ok(InviteEmail {
+        id: blob(
+            row.first()
+                .ok_or_else(|| internal("invalid invitation email"))?,
+        )?,
+        email: text(
+            row.get(1)
+                .ok_or_else(|| internal("invalid invitation email"))?,
+        )?
+        .to_string(),
+        role: text(
+            row.get(2)
+                .ok_or_else(|| internal("invalid invitation email"))?,
+        )?
+        .to_string(),
+        trip_title: text(
+            row.get(3)
+                .ok_or_else(|| internal("invalid invitation email"))?,
+        )?
+        .to_string(),
+        destination: text(
+            row.get(4)
+                .ok_or_else(|| internal("invalid invitation email"))?,
+        )?
+        .to_string(),
+        inviter_name: text(
+            row.get(5)
+                .ok_or_else(|| internal("invalid invitation email"))?,
+        )?
+        .to_string(),
+        account_state: text(
+            row.get(6)
+                .ok_or_else(|| internal("invalid invitation email"))?,
+        )?
+        .to_string(),
+        expires: integer(
+            row.get(7)
+                .ok_or_else(|| internal("invalid invitation email"))?,
+        )?,
+    })
+}
+
+async fn deliver_and_record(invite: &InviteEmail) -> &'static str {
+    let status = match deliver_invitation(invite).await {
+        Ok(()) => "sent",
+        Err(err) => {
+            eprintln!("invitation email delivery failed: {err}");
+            "failed"
+        }
+    };
+    if let Err(err) = execute(
+        "UPDATE trip_invites SET email_status = ?1, last_sent = UNIXEPOCH() WHERE id = ?2",
+        [
+            Value::Text(status.to_string()),
+            Value::Blob(invite.id.clone()),
+        ],
+    )
+    .await
+    {
+        eprintln!("failed to record invitation delivery: {err}");
+    }
+    status
+}
+
+async fn deliver_invitation(invite: &InviteEmail) -> Result<(), String> {
+    let settings = read_email_settings()
+        .await
+        .map_err(|_| "failed to read email settings".to_string())?;
+    let app_url = settings
+        .as_ref()
+        .map_or(DEV_APP_URL, |settings| settings.app_url.as_str());
+    let (subject, html, text_body) = invitation_message(invite, app_url);
+
+    if let Some(settings) = settings {
+        let payload = json!({
+            "from": settings.from,
+            "to": [invite.email],
+            "subject": subject,
+            "html": html,
+            "text": text_body,
+        });
+        return post_json(
+            "https://api.resend.com/emails",
+            &[
+                ("authorization", format!("Bearer {}", settings.api_key)),
+                ("user-agent", "Trailhead/1.0".to_string()),
+                (
+                    "idempotency-key",
+                    format!("trip-invite-{}-{}", encode_id(&invite.id), invite.expires),
+                ),
+            ],
+            &payload,
+        )
+        .await;
+    }
+
+    let payload = json!({
+        "From": {"Email": "noreply@trailhead.test", "Name": "Trailhead"},
+        "To": [{"Email": invite.email}],
+        "Subject": subject,
+        "HTML": html,
+        "Text": text_body,
+    });
+    post_json(MAILPIT_SEND_URL, &[], &payload).await
+}
+
+async fn post_json(
+    url: &str,
+    headers: &[(&str, String)],
+    payload: &JsonValue,
+) -> Result<(), String> {
+    let body = serde_json::to_vec(payload).map_err(|err| err.to_string())?;
+    let mut builder = wstd::http::Request::builder()
+        .method("POST")
+        .uri(url)
+        .header("content-type", "application/json");
+    for (name, value) in headers {
+        builder = builder.header(*name, value);
+    }
+    let request = builder
+        .body(body.into_body())
+        .map_err(|err| err.to_string())?;
+    let response = wstd::http::Client::new()
+        .send(request)
+        .await
+        .map_err(|err| err.to_string())?;
+    let status = response.status();
+    let response_body = response
+        .into_body()
+        .bytes()
+        .await
+        .map_err(|err| err.to_string())?;
+    if !status.is_success() {
+        return Err(format!(
+            "email provider returned {status}: {}",
+            String::from_utf8_lossy(&response_body)
+        ));
+    }
+    Ok(())
+}
+
+fn invitation_message(invite: &InviteEmail, app_url: &str) -> (String, String, String) {
+    let trip = escape_html(&invite.trip_title);
+    let destination = escape_html(&invite.destination);
+    let inviter = escape_html(&invite.inviter_name);
+    let role = escape_html(&invite.role);
+    let link = format!("{}/invitations", app_url.trim_end_matches('/'));
+    let (action, detail) = match invite.account_state.as_str() {
+        "verified" => (
+            "Sign in to review the invitation.",
+            "Your account is ready. Sign in, then accept or decline the invitation.",
+        ),
+        "unverified" => (
+            "Verify your account to continue.",
+            "Finish confirming your email address, then sign in to accept or decline.",
+        ),
+        _ => (
+            "Create an account to continue.",
+            "Create and verify your Trailhead account, then accept or decline the invitation.",
+        ),
+    };
+    let subject = format!(
+        "{} invited you to {}",
+        invite.inviter_name, invite.trip_title
+    );
+    let html = format!(
+        "<!doctype html><html lang='en'><body style='margin:0;background:#f7f5ef;color:#18211c;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Arial,sans-serif'><table role='presentation' width='100%' cellspacing='0' cellpadding='0' bgcolor='#f7f5ef'><tr><td align='center' style='padding:36px 16px'><table role='presentation' width='600' cellspacing='0' cellpadding='0' style='width:100%;max-width:600px;background:#fffefb;border:1px solid #dedbd0;border-radius:20px;overflow:hidden'><tr><td bgcolor='#173b2d' style='padding:30px 40px;color:#fff'><div style='color:#f5c77b;font-size:11px;font-weight:800;letter-spacing:2px;text-transform:uppercase'>Trip invitation</div><h1 style='margin:10px 0 0;font-size:34px;line-height:40px'>{trip}</h1></td></tr><tr><td style='padding:36px 40px'><p style='margin:0 0 18px;font-size:16px;line-height:26px'><strong>{inviter}</strong> invited you to plan a trip to <strong>{destination}</strong> as a <strong>{role}</strong>.</p><p style='margin:0 0 26px;color:#4e5c54;font-size:16px;line-height:26px'>{detail}</p><table role='presentation' cellspacing='0' cellpadding='0'><tr><td bgcolor='#f1b85b' style='border-radius:12px'><a href='{link}' style='display:inline-block;padding:15px 24px;color:#173b2d;font-weight:800;text-decoration:none'>Review invitation &rarr;</a></td></tr></table><p style='margin:26px 0 0;color:#68716b;font-size:13px;line-height:21px'>{action} This invitation expires in 7 days. Joining is always your choice.</p></td></tr><tr><td align='center' bgcolor='#173b2d' style='padding:22px;color:#9fb2a7;font-size:12px'>Sent by Trailhead &middot; Plan together. Go farther.</td></tr></table></td></tr></table></body></html>"
+    );
+    let text = format!(
+        "{inviter} invited you to {trip} in {destination} as a {role}.\n\n{detail}\n\nReview invitation: {link}\n\nThis invitation expires in 7 days. Joining is always your choice."
+    );
+    (subject, html, text)
+}
+
+fn escape_html(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
+}
+
 fn authenticated(req: &Request) -> Result<&trailbase_wasm::http::User, HttpError> {
     req.user()
         .ok_or_else(|| HttpError::status(StatusCode::UNAUTHORIZED))
@@ -578,6 +850,25 @@ fn internal(err: impl std::string::ToString) -> HttpError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn invitation_html_escapes_trip_content() {
+        let invite = InviteEmail {
+            id: vec![7; 16],
+            email: "guest@example.com".to_string(),
+            role: "viewer".to_string(),
+            trip_title: "Alps <script>".to_string(),
+            destination: "A&B".to_string(),
+            inviter_name: "Alice".to_string(),
+            account_state: "new".to_string(),
+            expires: 1,
+        };
+        let (_, html, text) = invitation_message(&invite, DEV_APP_URL);
+        assert!(html.contains("Alps &lt;script&gt;"));
+        assert!(html.contains("A&amp;B"));
+        assert!(!html.contains("Alps <script>"));
+        assert!(text.contains("Create and verify"));
+    }
 
     #[test]
     fn ids_round_trip() {
