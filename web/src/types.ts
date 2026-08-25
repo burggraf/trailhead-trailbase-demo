@@ -77,6 +77,15 @@ export interface ActivityEvent {
   created: number
 }
 
+export interface OwnerInvite {
+  id: string
+  email: string
+  role: Exclude<TripRole, 'owner'>
+  expires: number
+  email_status: 'pending' | 'sent' | 'failed'
+  last_sent: number | null
+}
+
 export interface PendingInvite {
   id: string
   trip_id: string
