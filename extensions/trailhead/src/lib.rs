@@ -73,6 +73,31 @@ struct EmailSettings {
     app_url: String,
 }
 
+#[derive(Clone, Deserialize, Serialize, Debug, PartialEq)]
+struct SuggestionSource {
+    title: String,
+    url: String,
+}
+
+#[derive(Clone, Deserialize, Serialize, Debug, PartialEq)]
+struct AiSuggestion {
+    #[serde(rename = "type")]
+    kind: String,
+    title: String,
+    description: String,
+    place: String,
+    date: String,
+    #[serde(default)]
+    time: String,
+    #[serde(default)]
+    sources: Vec<SuggestionSource>,
+}
+
+#[derive(Deserialize)]
+struct SuggestionEnvelope {
+    suggestions: Vec<AiSuggestion>,
+}
+
 struct InviteEmail {
     id: Vec<u8>,
     email: String,
@@ -83,6 +108,158 @@ struct InviteEmail {
     account_state: String,
     expires: i64,
     attempt: i64,
+}
+
+fn ordered_keys(keys: &[String], trip_id: &[u8]) -> Vec<String> {
+    if keys.is_empty() {
+        return Vec::new();
+    }
+    let start = trip_id.last().copied().unwrap_or_default() as usize % keys.len();
+    keys.iter()
+        .cycle()
+        .skip(start)
+        .take(keys.len())
+        .cloned()
+        .collect()
+}
+
+fn suggestion_prompt(
+    title: &str,
+    destination: &str,
+    start: &str,
+    end: &str,
+    notes: &str,
+    itinerary: &str,
+) -> String {
+    format!(
+        "Suggest 6-8 diverse local events and attractions for this trip. Return compact JSON only with a suggestions array; each item must have type (event or attraction), title, description, place, date, optional time, and sources. Dates must be inside the trip range.\n<TRIP_TITLE>\n{title}\n</TRIP_TITLE>\n<DESTINATION>\n{destination}\n</DESTINATION>\n<DATE_RANGE>{start} to {end}</DATE_RANGE>\n<NOTES>\n{notes}\n</NOTES>\n<CURRENT_ITINERARY>\n{itinerary}\n</CURRENT_ITINERARY>"
+    )
+}
+
+fn candidate_text(response: &JsonValue) -> String {
+    response
+        .get("candidates")
+        .and_then(JsonValue::as_array)
+        .and_then(|c| c.first())
+        .and_then(|c| c.get("content"))
+        .and_then(|c| c.get("parts"))
+        .and_then(JsonValue::as_array)
+        .map(|parts| {
+            parts
+                .iter()
+                .filter_map(|p| p.get("text").and_then(JsonValue::as_str))
+                .collect::<String>()
+        })
+        .unwrap_or_default()
+}
+
+fn grounding_sources(response: &JsonValue) -> Vec<SuggestionSource> {
+    response
+        .pointer("/candidates/0/groundingMetadata/groundingChunks")
+        .and_then(JsonValue::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|chunk| {
+            let web = chunk.get("web")?;
+            let url = web.get("uri")?.as_str()?;
+            if !url.starts_with("https://") {
+                return None;
+            }
+            Some(SuggestionSource {
+                title: web
+                    .get("title")
+                    .and_then(JsonValue::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+                url: url.to_string(),
+            })
+        })
+        .collect()
+}
+
+fn parse_gemini_suggestions(
+    response: &JsonValue,
+    start: &str,
+    end: &str,
+) -> Result<Vec<AiSuggestion>, String> {
+    let mut text = candidate_text(response).trim().to_string();
+    if text.starts_with("```") {
+        text = text
+            .lines()
+            .skip(1)
+            .take_while(|line| !line.trim().starts_with("```"))
+            .collect::<Vec<_>>()
+            .join("\n");
+    }
+    let envelope: SuggestionEnvelope = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+    let grounded = grounding_sources(response);
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for mut item in envelope.suggestions {
+        if !matches!(item.kind.as_str(), "event" | "attraction")
+            || !valid_iso_date(&item.date)
+            || item.date.as_str() < start
+            || item.date.as_str() > end
+            || !item.time.is_empty() && !valid_time(&item.time)
+        {
+            continue;
+        }
+        if item.title.is_empty()
+            || item.title.chars().count() > 120
+            || item.description.is_empty()
+            || item.description.chars().count() > 500
+            || item.place.is_empty()
+            || item.place.chars().count() > 160
+        {
+            continue;
+        }
+        let key = (
+            item.title.to_lowercase(),
+            item.place.to_lowercase(),
+            item.date.clone(),
+        );
+        if !seen.insert(key) {
+            continue;
+        }
+        item.sources.retain(|source| {
+            source.url.starts_with("https://") && grounded.iter().any(|g| g.url == source.url)
+        });
+        out.push(item);
+        if out.len() == 8 {
+            break;
+        }
+    }
+    if out.is_empty() {
+        return Err("no usable suggestions".to_string());
+    }
+    Ok(out)
+}
+
+fn valid_time(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.len() == 5
+        && bytes[2] == b':'
+        && bytes[..2].iter().all(u8::is_ascii_digit)
+        && bytes[3..].iter().all(u8::is_ascii_digit)
+        && bytes[..2].iter().fold(0, |n, b| n * 10 + (b - b'0')) <= 23
+        && bytes[3..].iter().fold(0, |n, b| n * 10 + (b - b'0')) <= 59
+}
+
+fn valid_iso_date(value: &str) -> bool {
+    if value.len() != 10 || value.as_bytes()[4] != b'-' || value.as_bytes()[7] != b'-' {
+        return false;
+    }
+    let digits = [0..4, 5..7, 8..10];
+    if digits.iter().any(|range| !value[range.clone()].bytes().all(|b| b.is_ascii_digit())) {
+        return false;
+    }
+    let month = value[5..7].parse::<u8>().unwrap_or(0);
+    let day = value[8..10].parse::<u8>().unwrap_or(0);
+    (1..=12).contains(&month) && (1..=31).contains(&day)
+}
+
+fn retryable_provider_status(status: u16) -> bool {
+    status == 401 || status == 403 || status == 429 || (500..600).contains(&status)
 }
 
 async fn whoami(req: Request) -> Result<Json<JsonValue>, HttpError> {
@@ -892,5 +1069,60 @@ mod tests {
     fn ids_round_trip() {
         let id = [7_u8; 16];
         assert_eq!(decode_id(&encode_id(&id)).expect("valid id"), id);
+    }
+
+    #[test]
+    fn orders_keys_from_trip_shard_and_wraps() {
+        let keys = vec!["a".into(), "b".into(), "c".into()];
+        assert_eq!(ordered_keys(&keys, &[0, 0, 0, 1]), vec!["b", "c", "a"]);
+    }
+
+    #[test]
+    fn validates_deduplicates_and_filters_grounded_suggestions() {
+        let response = json!({"candidates": [{
+            "content": {"parts": [{"text": r#"{"suggestions":[
+                {"type":"event","title":"Night Market","description":"Local food stalls.","place":"Main Square","date":"2026-10-02","time":"18:30","sources":[{"title":"City","url":"https://city.example/event"}]},
+                {"type":"event","title":"Night Market","description":"Duplicate.","place":"Main Square","date":"2026-10-02","time":"18:30","sources":[]},
+                {"type":"attraction","title":"Too Late","description":"Outside trip.","place":"Museum","date":"2026-10-09","time":"","sources":[]}
+            ]}"#}]},
+            "groundingMetadata": {"groundingChunks": [{"web": {"title":"City","uri":"https://city.example/event"}}]}
+        }]});
+        let suggestions = parse_gemini_suggestions(&response, "2026-10-01", "2026-10-04")
+            .expect("valid suggestions");
+        assert_eq!(suggestions.len(), 1);
+        assert_eq!(suggestions[0].sources.len(), 1);
+    }
+
+    #[test]
+    fn parses_fenced_json_and_rejects_invalid_time() {
+        let text = r#"```json
+{"suggestions":[{"type":"event","title":"X","description":"Y","place":"Z","date":"2026-10-02","time":"25:00"}]}
+```"#;
+        let response = json!({"candidates":[{"content":{"parts":[{"text":text}]}}]});
+        assert!(parse_gemini_suggestions(&response, "2026-10-01", "2026-10-04").is_err());
+    }
+
+    #[test]
+    fn caps_suggestions_and_classifies_statuses() {
+        let suggestions = (0..9).map(|i| json!({"type":"event","title":format!("T{i}"),"description":"D","place":"P","date":"2026-10-02","time":""})).collect::<Vec<_>>();
+        let response = json!({"candidates":[{"content":{"parts":[{"text":json!({"suggestions": suggestions}).to_string()}]}}]});
+        assert_eq!(
+            parse_gemini_suggestions(&response, "2026-10-01", "2026-10-04")
+                .unwrap()
+                .len(),
+            8
+        );
+        for status in [401, 403, 429, 500, 599] {
+            assert!(retryable_provider_status(status));
+        }
+        assert!(!retryable_provider_status(400));
+    }
+
+    #[test]
+    fn empty_or_ungrounded_sources_are_removed() {
+        let text = r#"{"suggestions":[{"type":"event","title":"X","description":"D","place":"P","date":"2026-10-02","sources":[{"title":"bad","url":"http://bad"},{"title":"none","url":"https://none"}]}]}"#;
+        let response = json!({"candidates":[{"content":{"parts":[{"text":text}]},"groundingMetadata":{"groundingChunks":[{"web":{"title":"good","uri":"https://good"}}]}}]});
+        let parsed = parse_gemini_suggestions(&response, "2026-10-01", "2026-10-04").unwrap();
+        assert!(parsed[0].sources.is_empty());
     }
 }
