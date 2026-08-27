@@ -67,7 +67,7 @@ Secrets are written below `traildepot/secrets/`, which is ignored by Git.
 
 ## Gemini itinerary suggestions (optional)
 
-Trip owners and editors can ask for current events and attractions from the Itinerary tab. The component sends only the destination and dates to Tavily Basic Search, then sends bounded trip context plus sanitized Tavily snippets to Gemini 3.1 Flash-Lite for ungrounded generation. Suggestions stay ephemeral in the browser until scheduled; they are not shared or stored as suggestion records. Sources shown to users are exact HTTPS Tavily result URLs.
+Trip owners and editors can ask for current events and attractions from the Itinerary tab. The component sends only the destination and dates to Tavily Basic Search, then sends bounded trip context plus bounded Tavily snippets treated as untrusted data to Gemini 3.1 Flash-Lite for ungrounded generation. Suggestions stay ephemeral in the browser until scheduled; they are not shared or stored as suggestion records. Sources shown to users are validated, normalized HTTPS Tavily URLs allowlisted by matching Tavily title and URL.
 
 Configure the component through admin-only `GET`/`POST /trailhead/admin/ai-settings`. Use an authenticated TrailBase admin token and its required CSRF token for POST (or an authenticated TrailBase client that supplies both). The POST body is:
 
@@ -81,7 +81,7 @@ Configure the component through admin-only `GET`/`POST /trailhead/admin/ai-setti
 
 Keys are kept in protected component preferences. GET returns only `configured`, `model`, `key_count`, and `search_configured`; it never leaks keys. Keep keys server-side, restrict Gemini keys to the Gemini API, and prefer current Google AI Studio authorization keys. Multiple keys from one Google project share that project's quota. Tavily's free Researcher tier includes 1,000 credits/month with no card required; Basic Search costs one credit per generation. See [Tavily pricing](https://www.tavily.com/pricing) and [Tavily credits](https://docs.tavily.com/documentation/api-credits).
 
-Google may use free-tier prompts and responses to improve its products. Use demo-safe trip content, review generated results and exact source links, and expect provider/model availability, quotas, pricing, search results, and generated results to vary. See [`extensions/trailhead/README.md`](extensions/trailhead/README.md) for component details.
+Google may use free-tier prompts and responses to improve its products. Use demo-safe trip content, review generated results and validated source links, and expect provider/model availability, quotas, pricing, search results, and generated results to vary. See [`extensions/trailhead/README.md`](extensions/trailhead/README.md) for component details.
 
 ## MCP
 
