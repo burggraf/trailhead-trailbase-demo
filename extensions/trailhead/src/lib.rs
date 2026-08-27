@@ -449,7 +449,7 @@ fn parse_gemini_suggestions(
             break;
         }
     }
-    if out.is_empty() {
+    if out.len() < 6 {
         return Err("no usable suggestions".to_string());
     }
     Ok(out)
@@ -1528,6 +1528,21 @@ mod tests {
         assert_eq!(ordered_keys(&keys, &[0, 0, 0, 1]), vec!["b", "c", "a"]);
     }
 
+    fn cited_response(count: usize) -> (JsonValue, Vec<TavilyResult>) {
+        let allowlist = (0..count)
+            .map(|i| TavilyResult {
+                title: format!("City{i}"),
+                url: format!("https://city{i}.example"),
+                content: "x".into(),
+            })
+            .collect::<Vec<_>>();
+        let suggestions = (0..count).map(|i| json!({"type":"event","title":format!("Event{i}"),"description":"D","place":"P","date":"2026-10-02","time":"","sources":[{"title":format!("City{i}"),"url":format!("https://city{i}.example")}]})).collect::<Vec<_>>();
+        (
+            json!({"candidates":[{"content":{"parts":[{"text":json!({"suggestions":suggestions}).to_string()}]}}]}),
+            allowlist,
+        )
+    }
+
     #[test]
     fn validates_deduplicates_and_filters_grounded_suggestions() {
         let response = json!({"candidates": [{
@@ -1542,11 +1557,19 @@ mod tests {
             url: "https://city.example/event".into(),
             content: "event".into(),
         }];
-        let suggestions =
-            parse_gemini_suggestions(&response, "2026-10-01", "2026-10-04", &allowlist)
-                .expect("valid suggestions");
-        assert_eq!(suggestions.len(), 1);
-        assert_eq!(suggestions[0].sources.len(), 1);
+        assert!(
+            parse_gemini_suggestions(&response, "2026-10-01", "2026-10-04", &allowlist).is_err()
+        );
+    }
+
+    #[test]
+    fn requires_six_valid_cited_suggestions() {
+        for count in [5, 6] {
+            let (response, allowlist) = cited_response(count);
+            let parsed =
+                parse_gemini_suggestions(&response, "2026-10-01", "2026-10-04", &allowlist);
+            assert_eq!(parsed.is_ok(), count == 6);
+        }
     }
 
     #[test]
@@ -1555,7 +1578,7 @@ mod tests {
 {"suggestions":[{"type":"event","title":"X","description":"Y","place":"Z","date":"2026-10-02","time":"","sources":[{"title":"City","url":"https://city.example"}]}]}
 ```"#;
         let response = json!({"candidates":[{"content":{"parts":[{"text":text}]}}]});
-        assert_eq!(
+        assert!(
             parse_gemini_suggestions(
                 &response,
                 "2026-10-01",
@@ -1566,9 +1589,7 @@ mod tests {
                     content: "x".into()
                 }]
             )
-            .unwrap()
-            .len(),
-            1
+            .is_err()
         );
     }
 
@@ -1674,7 +1695,7 @@ mod tests {
     #[test]
     fn candidate_text_concatenates_all_text_parts() {
         let response = json!({"candidates":[{"content":{"parts":[{"text":"{\"suggestions\":["},{"text":"{\"type\":\"event\",\"title\":\"X\",\"description\":\"D\",\"place\":\"P\",\"date\":\"2026-10-02\",\"time\":\"\",\"sources\":[{\"title\":\"City\",\"url\":\"https://city.example\"}]}"},{"text":"]}"}]}}]});
-        assert_eq!(
+        assert!(
             parse_gemini_suggestions(
                 &response,
                 "2026-10-01",
@@ -1685,9 +1706,7 @@ mod tests {
                     content: "x".into()
                 }]
             )
-            .unwrap()
-            .len(),
-            1
+            .is_err()
         );
     }
 
@@ -1967,14 +1986,8 @@ mod tests {
             url: "https://same".into(),
             content: "snippet".into(),
         }];
-        let parsed =
-            parse_gemini_suggestions(&response, "2026-10-01", "2026-10-04", &allowlist).unwrap();
-        assert_eq!(
-            parsed[0].sources,
-            vec![SuggestionSource {
-                title: "Right".into(),
-                url: "https://same".into()
-            }]
+        assert!(
+            parse_gemini_suggestions(&response, "2026-10-01", "2026-10-04", &allowlist).is_err()
         );
     }
 
