@@ -40,6 +40,19 @@ describe('Itinerary suggestions', () => {
     vi.mocked(confirm).mockReturnValue(true); fireEvent.click(page.getByRole('button', { name: 'Search again' })); expect(await page.findByText('New idea')).toBeTruthy(); expect(page.queryByText('Schedule Night Market')).toBeNull()
   })
 
+  it('opens the schedule editor inside the selected suggestion card', async () => {
+    mocks.extension.mockResolvedValue({ suggestions: [suggestion] })
+    const page = renderItinerary()
+    fireEvent.click(page.getByRole('button', { name: 'Suggest things to do' }))
+    await page.findByText('Night Market')
+    const scheduleButton = page.getByRole('button', { name: 'Schedule' })
+    fireEvent.click(scheduleButton)
+    const heading = page.getByRole('heading', { name: 'Schedule Night Market' })
+    expect(scheduleButton.parentElement?.contains(heading)).toBe(true)
+    expect(page.getByRole('button', { name: 'Scheduling…' }).getAttribute('aria-expanded')).toBe('true')
+    expect(document.activeElement).toBe(page.getAllByLabelText('Title')[0])
+  })
+
   it('schedules with optional time and keeps the form on failure', async () => {
     mocks.extension.mockResolvedValue({ suggestions: [suggestion] }); const invalidate = vi.fn(); const page = renderItinerary(invalidate); fireEvent.click(page.getByRole('button', { name: 'Suggest things to do' })); await page.findByText('Night Market'); fireEvent.click(page.getByRole('button', { name: 'Schedule' }))
     const day = page.getAllByLabelText('Date')[0]!; expect(day.getAttribute('min')).toBe(trip.start_date); expect(day.getAttribute('max')).toBe(trip.end_date); expect((page.getAllByLabelText('Time')[0] as HTMLInputElement).value).toBe('')
