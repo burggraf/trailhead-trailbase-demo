@@ -4,11 +4,11 @@ import { fireEvent, render, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { Members } from './TripPage'
 
-const mocks = vi.hoisted(() => ({ extension: vi.fn(), update: vi.fn(), remove: vi.fn() }))
+const mocks = vi.hoisted(() => ({ extension: vi.fn(), create: vi.fn(), update: vi.fn(), remove: vi.fn() }))
 vi.mock('../lib/trailbase', () => ({
   client: {
     base: new URL('http://localhost:4000'),
-    records: () => ({ update: mocks.update, delete: mocks.remove }),
+    records: () => ({ create: mocks.create, update: mocks.update, delete: mocks.remove, list: vi.fn() }),
   },
   extension: mocks.extension,
   recordFileUrl: vi.fn(),

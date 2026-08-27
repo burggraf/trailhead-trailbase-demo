@@ -37,6 +37,18 @@ export interface TripMember {
   avatar_url: string | null
 }
 
+export interface SuggestionSource { title: string; url: string }
+
+export interface AiSuggestion {
+  type: 'event' | 'attraction'
+  title: string
+  description: string
+  place: string
+  date: string
+  time: string
+  sources: SuggestionSource[]
+}
+
 export interface ItineraryItem {
   id: string
   trip_id: string
