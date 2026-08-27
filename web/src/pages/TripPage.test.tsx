@@ -27,7 +27,7 @@ describe('Itinerary suggestions', () => {
     const page = renderItinerary()
     fireEvent.click(page.getByRole('button', { name: 'Suggest things to do' }))
     expect(await page.findByText('Night Market')).toBeTruthy()
-    expect(page.getByText('Local food and music.')).toBeTruthy()
+    expect(page.getByText('event')).toBeTruthy(); expect(page.getByText('Local food and music.')).toBeTruthy(); expect(page.getAllByText(/^Main Square · 2026-10-02 ·\s*$/)).toHaveLength(2)
     const sources = page.getAllByRole('link', { name: 'City events' }); expect(sources).toHaveLength(1); expect(sources[0]!.getAttribute('href')).toBe('https://city.example/event'); expect(sources[0]!.getAttribute('target')).toBe('_blank'); expect(sources[0]!.getAttribute('rel')).toContain('noreferrer'); expect(page.queryByRole('link', { name: 'Unsafe source' })).toBeNull()
     fireEvent.click(page.getByRole('button', { name: 'Dismiss Night Market' })); expect(page.queryByText('Night Market')).toBeNull()
     fireEvent.click(page.getByRole('button', { name: 'Clear suggestions' })); expect(page.queryByText('Colosseum')).toBeNull()
@@ -61,11 +61,12 @@ describe('Itinerary suggestions', () => {
   })
 
   it('guards duplicate schedule submissions while pending', async () => {
-    mocks.extension.mockResolvedValue({ suggestions: [suggestion] }); mocks.create.mockReturnValue(new Promise(() => undefined)); const page = renderItinerary(); fireEvent.click(page.getByRole('button', { name: 'Suggest things to do' })); await page.findByText('Night Market'); fireEvent.click(page.getByRole('button', { name: 'Schedule' })); fireEvent.change(page.getAllByLabelText('Date')[0]!, { target: { value: '2026-10-02' } }); fireEvent.change(page.getAllByLabelText('Time')[0]!, { target: { value: '10:00' } }); fireEvent.click(page.getAllByRole('button', { name: 'Add to itinerary' })[0]!); fireEvent.click(page.getAllByRole('button', { name: 'Add to itinerary' })[0]!); await waitFor(() => expect(mocks.create).toHaveBeenCalledTimes(1)); expect((page.getAllByRole('button', { name: 'Add to itinerary' })[0] as HTMLButtonElement).disabled).toBe(true)
+    let finishItinerary!: (id: string) => void
+    mocks.extension.mockResolvedValue({ suggestions: [suggestion] }); mocks.create.mockImplementation((name: string) => name === 'itinerary_items' ? new Promise((resolve) => { finishItinerary = resolve }) : Promise.resolve('event-id')); const page = renderItinerary(); fireEvent.click(page.getByRole('button', { name: 'Suggest things to do' })); await page.findByText('Night Market'); fireEvent.click(page.getByRole('button', { name: 'Schedule' })); fireEvent.change(page.getAllByLabelText('Date')[0]!, { target: { value: '2026-10-02' } }); fireEvent.change(page.getAllByLabelText('Time')[0]!, { target: { value: '10:00' } }); fireEvent.click(page.getAllByRole('button', { name: 'Add to itinerary' })[0]!); fireEvent.click(page.getAllByRole('button', { name: 'Add to itinerary' })[0]!); await waitFor(() => expect(mocks.create).toHaveBeenCalledTimes(1)); expect((page.getAllByRole('button', { name: 'Add to itinerary' })[0] as HTMLButtonElement).disabled).toBe(true); finishItinerary('item-id'); await waitFor(() => expect(mocks.create).toHaveBeenCalledTimes(2)); expect(mocks.create.mock.calls.filter(([name]) => name === 'itinerary_items')).toHaveLength(1); expect(mocks.create.mock.calls.filter(([name]) => name === 'activity_events')).toHaveLength(1)
   })
 
   it('guards duplicate manual submissions while pending', () => {
-    mocks.create.mockReturnValue(new Promise(() => undefined)); const page = renderItinerary(); fireEvent.change(page.getByLabelText('Date'), { target: { value: '2026-10-02' } }); fireEvent.change(page.getByLabelText('What’s happening?'), { target: { value: 'Manual stop' } }); fireEvent.submit(page.container.querySelector('form')!); fireEvent.submit(page.container.querySelector('form')!); return waitFor(() => expect(mocks.create).toHaveBeenCalledTimes(1))
+    mocks.create.mockReturnValue(new Promise(() => undefined)); const page = renderItinerary(); const day = page.getByLabelText('Date'); expect(day.getAttribute('min')).toBe(trip.start_date); expect(day.getAttribute('max')).toBe(trip.end_date); fireEvent.change(day, { target: { value: '2026-10-02' } }); fireEvent.change(page.getByLabelText('What’s happening?'), { target: { value: 'Manual stop' } }); fireEvent.submit(page.container.querySelector('form')!); fireEvent.submit(page.container.querySelector('form')!); return waitFor(() => expect(mocks.create).toHaveBeenCalledTimes(1))
   })
 
   it('hides suggestions for viewers and disables duplicate editor searches', async () => {
