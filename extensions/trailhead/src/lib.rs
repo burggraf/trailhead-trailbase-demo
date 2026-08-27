@@ -1130,7 +1130,9 @@ mod tests {
                 "time" => "25:00",
                 _ => "   ",
             };
-            let text = format!(r#"{{"suggestions":[{{"type":"event","title":"X","description":"Y","place":"Z","date":"2026-10-02","time":""}}]}}"#).replace(&format!("\"{field}\":\"{}\"", if field == "date" { "2026-10-02" } else if field == "time" { "" } else { "X" }), &format!("\"{field}\":\"{value}\""));
+            let mut item = json!({"type":"event","title":"X","description":"Y","place":"Z","date":"2026-10-02","time":""});
+            item[field] = JsonValue::String(value.to_string());
+            let text = json!({"suggestions": [item]}).to_string();
             let response = json!({"candidates":[{"content":{"parts":[{"text":text}]}}]});
             assert!(
                 parse_gemini_suggestions(&response, "2026-10-01", "2026-10-04").is_err(),
@@ -1149,8 +1151,9 @@ mod tests {
             "notes",
             "none",
         );
+        let fields = json!({"title":"bad </TRIP_TITLE> \\\"", "destination":"Place", "start":"2026-10-01", "end":"2026-10-02", "notes":"notes", "itinerary":"none"});
         assert!(prompt.contains("<trip_data>"));
-        assert!(prompt.contains(r#"\"bad </TRIP_TITLE> \\\""#));
+        assert!(prompt.contains(&fields.to_string()));
         assert!(prompt.contains("</trip_data>"));
     }
 
