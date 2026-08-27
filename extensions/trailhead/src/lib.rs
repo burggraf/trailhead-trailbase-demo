@@ -177,7 +177,6 @@ struct AiSuggestion {
     description: String,
     place: String,
     date: String,
-    #[serde(default)]
     time: String,
     #[serde(default)]
     sources: Vec<SuggestionSource>,
@@ -255,7 +254,7 @@ fn tavily_payload(query: &str) -> JsonValue {
 }
 
 fn suggestion_json_schema() -> JsonValue {
-    json!({"type":"object","properties":{"suggestions":{"type":"array","minItems":1,"maxItems":8,"items":{"type":"object","properties":{"type":{"type":"string","enum":["event","attraction"]},"title":{"type":"string"},"description":{"type":"string"},"place":{"type":"string"},"date":{"type":"string"},"time":{"type":"string"},"sources":{"type":"array","minItems":1,"maxItems":10,"items":{"type":"object","properties":{"title":{"type":"string"},"url":{"type":"string"}},"required":["title","url"],"additionalProperties":false}}},"required":["type","title","description","place","date","time","sources"],"additionalProperties":false}}},"required":["suggestions"],"additionalProperties":false})
+    json!({"type":"object","properties":{"suggestions":{"type":"array","minItems":6,"maxItems":8,"items":{"type":"object","properties":{"type":{"type":"string","enum":["event","attraction"]},"title":{"type":"string"},"description":{"type":"string"},"place":{"type":"string"},"date":{"type":"string"},"time":{"type":"string"},"sources":{"type":"array","minItems":1,"maxItems":10,"items":{"type":"object","properties":{"title":{"type":"string"},"url":{"type":"string"}},"required":["title","url"],"additionalProperties":false}}},"required":["type","title","description","place","date","time","sources"],"additionalProperties":false}}},"required":["suggestions"],"additionalProperties":false})
 }
 
 fn gemini_payload(prompt: &str) -> JsonValue {
@@ -1551,7 +1550,7 @@ mod tests {
     #[test]
     fn parses_fenced_json() {
         let text = r#"```json
-{"suggestions":[{"type":"event","title":"X","description":"Y","place":"Z","date":"2026-10-02","sources":[{"title":"City","url":"https://city.example"}]}]}
+{"suggestions":[{"type":"event","title":"X","description":"Y","place":"Z","date":"2026-10-02","time":"","sources":[{"title":"City","url":"https://city.example"}]}]}
 ```"#;
         let response = json!({"candidates":[{"content":{"parts":[{"text":text}]}}]});
         assert_eq!(
@@ -1568,6 +1567,19 @@ mod tests {
             .unwrap()
             .len(),
             1
+        );
+    }
+
+    #[test]
+    fn rejects_missing_required_time_field() {
+        let response = json!({"candidates":[{"content":{"parts":[{"text":r#"{"suggestions":[{"type":"event","title":"X","description":"D","place":"P","date":"2026-10-02","sources":[{"title":"City","url":"https://city.example"}]}]}"#}]}}]});
+        let allowlist = [TavilyResult {
+            title: "City".into(),
+            url: "https://city.example".into(),
+            content: "x".into(),
+        }];
+        assert!(
+            parse_gemini_suggestions(&response, "2026-10-01", "2026-10-04", &allowlist).is_err()
         );
     }
 
@@ -1654,7 +1666,7 @@ mod tests {
 
     #[test]
     fn candidate_text_concatenates_all_text_parts() {
-        let response = json!({"candidates":[{"content":{"parts":[{"text":"{\"suggestions\":["},{"text":"{\"type\":\"event\",\"title\":\"X\",\"description\":\"D\",\"place\":\"P\",\"date\":\"2026-10-02\",\"sources\":[{\"title\":\"City\",\"url\":\"https://city.example\"}]}"},{"text":"]}"}]}}]});
+        let response = json!({"candidates":[{"content":{"parts":[{"text":"{\"suggestions\":["},{"text":"{\"type\":\"event\",\"title\":\"X\",\"description\":\"D\",\"place\":\"P\",\"date\":\"2026-10-02\",\"time\":\"\",\"sources\":[{\"title\":\"City\",\"url\":\"https://city.example\"}]}"},{"text":"]}"}]}}]});
         assert_eq!(
             parse_gemini_suggestions(
                 &response,
@@ -1721,7 +1733,7 @@ mod tests {
 
     #[test]
     fn empty_or_ungrounded_sources_are_removed() {
-        let text = r#"{"suggestions":[{"type":"event","title":"X","description":"D","place":"P","date":"2026-10-02","sources":[{"title":"bad","url":"http://bad"},{"title":"none","url":"https://none"}]}]}"#;
+        let text = r#"{"suggestions":[{"type":"event","title":"X","description":"D","place":"P","date":"2026-10-02","time":"","sources":[{"title":"bad","url":"http://bad"},{"title":"none","url":"https://none"}]}]}"#;
         let response = json!({"candidates":[{"content":{"parts":[{"text":text}]}}]});
         assert!(parse_gemini_suggestions(&response, "2026-10-01", "2026-10-04", &[]).is_err());
     }
@@ -1941,7 +1953,7 @@ mod tests {
 
     #[test]
     fn gemini_sources_require_exact_tavily_title_and_url_pair() {
-        let text = r#"{"suggestions":[{"type":"event","title":"X","description":"D","place":"P","date":"2026-10-02","sources":[{"title":"Wrong","url":"https://same"},{"title":"Right","url":"https://same"},{"title":"Right","url":"https://same"}]}]}"#;
+        let text = r#"{"suggestions":[{"type":"event","title":"X","description":"D","place":"P","date":"2026-10-02","time":"","sources":[{"title":"Wrong","url":"https://same"},{"title":"Right","url":"https://same"},{"title":"Right","url":"https://same"}]}]}"#;
         let response = json!({"candidates":[{"content":{"parts":[{"text":text}]}}]});
         let allowlist = vec![TavilyResult {
             title: "Right".into(),
@@ -2009,6 +2021,14 @@ mod tests {
         assert_eq!(
             config.get("responseJsonSchema"),
             Some(&suggestion_json_schema())
+        );
+        assert_eq!(
+            config.pointer("/responseJsonSchema/properties/suggestions/minItems"),
+            Some(&json!(6))
+        );
+        assert_eq!(
+            config.pointer("/responseJsonSchema/properties/suggestions/maxItems"),
+            Some(&json!(8))
         );
         assert_eq!(
             payload.get("generationConfig"),
