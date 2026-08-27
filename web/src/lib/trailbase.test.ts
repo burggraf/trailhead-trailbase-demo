@@ -44,6 +44,21 @@ describe('TrailBase authentication persistence', () => {
     await expect(extension('/x')).resolves.toEqual({ ok: true })
   })
 
+  it('bounds error response consumption', async () => {
+    let pulls = 0
+    const body = new ReadableStream({
+      pull(controller) {
+        pulls++
+        controller.enqueue(new TextEncoder().encode('x'.repeat(4096)))
+        if (pulls > 1) controller.close()
+      },
+    })
+    mocks.client.fetch.mockResolvedValue(new Response(body, { status: 503 }))
+    const { extension } = await import('./trailbase')
+    await expect(extension('/x')).rejects.toThrow('Request failed (503)')
+    expect(pulls).toBeLessThanOrEqual(2)
+  })
+
   it('stores only safe internal authentication return paths', async () => {
     const { rememberAuthReturn, takeAuthReturn } = await import('./trailbase')
     rememberAuthReturn('/invitations')

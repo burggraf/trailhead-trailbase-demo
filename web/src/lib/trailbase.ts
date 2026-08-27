@@ -57,11 +57,28 @@ export function authUi(path: string, redirect = window.location.origin) {
   return url.toString()
 }
 
+async function boundedBody(response: Response, limit = 4096) {
+  if (!response.body) return ''
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let body = ''
+  try {
+    while (body.length < limit) {
+      const { done, value } = await reader.read()
+      if (done) break
+      body += decoder.decode(value, { stream: true })
+    }
+  } finally {
+    await reader.cancel()
+  }
+  return body.slice(0, limit)
+}
+
 export async function extension<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await client.fetch(`/trailhead${path}`, init)
   if (response.ok) return response.json() as Promise<T>
 
-  const body = (await response.text()).slice(0, 8192)
+  const body = await boundedBody(response)
   let error: { message?: unknown; msg?: unknown } | undefined
   try { error = JSON.parse(body) as typeof error } catch { /* use status fallback */ }
   const message = typeof error?.message === 'string' ? error.message : error?.msg
