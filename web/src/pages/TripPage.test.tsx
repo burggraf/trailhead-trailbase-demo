@@ -47,6 +47,26 @@ describe('Itinerary suggestions', () => {
 
   it('shows provider errors and retries successfully', async () => { mocks.extension.mockRejectedValueOnce(new Error('Suggestions are temporarily unavailable.')).mockResolvedValueOnce({ suggestions: [suggestion] }); const page = renderItinerary(); fireEvent.click(page.getByRole('button', { name: 'Suggest things to do' })); expect((await page.findByRole('alert')).textContent).toContain('temporarily unavailable'); fireEvent.click(page.getByRole('button', { name: 'Try again' })); expect(await page.findByText('Night Market')).toBeTruthy() })
 
+  it('clears an open schedule form with Clear suggestions', async () => {
+    mocks.extension.mockResolvedValue({ suggestions: [suggestion] }); const page = renderItinerary(); fireEvent.click(page.getByRole('button', { name: 'Suggest things to do' })); await page.findByText('Night Market'); fireEvent.click(page.getByRole('button', { name: 'Schedule' })); fireEvent.click(page.getByRole('button', { name: 'Clear suggestions' })); expect(page.queryByText('Night Market')).toBeNull(); expect(page.queryByText('Schedule Night Market')).toBeNull()
+  })
+
+  it('keeps the suggestion when activity logging fails', async () => {
+    mocks.extension.mockResolvedValue({ suggestions: [suggestion] }); mocks.create.mockImplementation((name: string) => name === 'activity_events' ? Promise.reject(new Error('activity failed')) : Promise.resolve('id')); const page = renderItinerary(); fireEvent.click(page.getByRole('button', { name: 'Suggest things to do' })); await page.findByText('Night Market'); fireEvent.click(page.getByRole('button', { name: 'Schedule' })); fireEvent.submit(page.getByRole('heading', { name: 'Schedule Night Market' }).closest('div')!.querySelector('form')!); expect((await page.findAllByText('activity failed')).length).toBeGreaterThan(0); expect(page.getByText('Schedule Night Market')).toBeTruthy(); expect(page.getByText('Night Market')).toBeTruthy()
+  })
+
+  it('uses edited fields and writes itinerary before activity', async () => {
+    mocks.extension.mockResolvedValue({ suggestions: [suggestion] }); const invalidate = vi.fn(); const page = renderItinerary(invalidate); fireEvent.click(page.getByRole('button', { name: 'Suggest things to do' })); await page.findByText('Night Market'); fireEvent.click(page.getByRole('button', { name: 'Schedule' })); fireEvent.change(page.getAllByLabelText('Title')[0]!, { target: { value: 'Edited market' } }); fireEvent.change(page.getAllByLabelText('Place')[0]!, { target: { value: 'Edited square' } }); fireEvent.change(page.getAllByLabelText('Date')[0]!, { target: { value: '2026-10-03' } }); fireEvent.submit(page.getByRole('heading', { name: 'Schedule Night Market' }).closest('div')!.querySelector('form')!); await waitFor(() => expect(mocks.create).toHaveBeenCalledTimes(2)); expect(mocks.create.mock.calls[0]).toEqual(['itinerary_items', expect.objectContaining({ title: 'Edited market', place: 'Edited square', day: '2026-10-03', start_time: '' })]); expect(mocks.create.mock.calls[1]![0]).toBe('activity_events'); expect(invalidate).toHaveBeenCalled(); expect(page.queryByText('Schedule Night Market')).toBeNull()
+  })
+
+  it('guards duplicate schedule submissions while pending', async () => {
+    mocks.extension.mockResolvedValue({ suggestions: [suggestion] }); mocks.create.mockReturnValue(new Promise(() => undefined)); const page = renderItinerary(); fireEvent.click(page.getByRole('button', { name: 'Suggest things to do' })); await page.findByText('Night Market'); fireEvent.click(page.getByRole('button', { name: 'Schedule' })); const form = page.getByRole('heading', { name: 'Schedule Night Market' }).closest('div')!.querySelector('form')!; fireEvent.change(page.getAllByLabelText('Date')[0]!, { target: { value: '2026-10-02' } }); fireEvent.change(page.getAllByLabelText('Time')[0]!, { target: { value: '10:00' } }); fireEvent.click(page.getAllByRole('button', { name: 'Add to itinerary' })[0]!); fireEvent.click(page.getAllByRole('button', { name: 'Add to itinerary' })[0]!); await waitFor(() => expect(mocks.create).toHaveBeenCalledTimes(1)); expect((page.getAllByRole('button', { name: 'Add to itinerary' })[0] as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('guards duplicate manual submissions while pending', () => {
+    mocks.create.mockReturnValue(new Promise(() => undefined)); const page = renderItinerary(); fireEvent.change(page.getByLabelText('Date'), { target: { value: '2026-10-02' } }); fireEvent.change(page.getByLabelText('What’s happening?'), { target: { value: 'Manual stop' } }); fireEvent.submit(page.container.querySelector('form')!); fireEvent.submit(page.container.querySelector('form')!); return waitFor(() => expect(mocks.create).toHaveBeenCalledTimes(1))
+  })
+
   it('hides suggestions for viewers and disables duplicate editor searches', async () => {
     const queryClient = new QueryClient(); const page = render(<QueryClientProvider client={queryClient}><Itinerary trip={trip} userId="u1" items={[]} canEdit={false} invalidate={vi.fn()} /></QueryClientProvider>)
     expect(page.queryByText('Suggest things to do')).toBeNull()
