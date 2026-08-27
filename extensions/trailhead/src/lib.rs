@@ -98,7 +98,12 @@ fn default_ai_model() -> String {
 
 fn normalize_ai_settings(input: AiSettingsInput) -> Result<Option<AiSettings>, String> {
     let mut keys = Vec::new();
-    for key in input.api_keys.lines().map(str::trim).filter(|key| !key.is_empty()) {
+    for key in input
+        .api_keys
+        .lines()
+        .map(str::trim)
+        .filter(|key| !key.is_empty())
+    {
         if !keys.iter().any(|existing| existing == key) {
             keys.push(key.to_string());
         }
@@ -107,11 +112,20 @@ fn normalize_ai_settings(input: AiSettingsInput) -> Result<Option<AiSettings>, S
         return Ok(None);
     }
     let model = input.model.trim().to_string();
-    if model.is_empty() || model.len() > 64 || !model.starts_with("gemini-") || !model.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-')) {
+    if model.is_empty()
+        || model.len() > 64
+        || !model.starts_with("gemini-")
+        || !model
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+    {
         return Err("model must be a valid Gemini model name".to_string());
     }
     keys.truncate(10);
-    Ok(Some(AiSettings { api_keys: keys, model }))
+    Ok(Some(AiSettings {
+        api_keys: keys,
+        model,
+    }))
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -147,7 +161,6 @@ struct InviteEmail {
     destination: String,
     inviter_name: String,
     account_state: String,
-    expires: i64,
     attempt: i64,
 }
 
@@ -375,7 +388,9 @@ async fn set_email_settings(mut req: Request) -> Result<Json<JsonValue>, HttpErr
 async fn get_ai_settings(_req: Request) -> Result<Json<JsonValue>, HttpError> {
     let settings = read_ai_settings().await?;
     Ok(Json(match settings {
-        Some(settings) => json!({"configured": true, "model": settings.model, "key_count": settings.api_keys.len()}),
+        Some(settings) => {
+            json!({"configured": true, "model": settings.model, "key_count": settings.api_keys.len()})
+        }
         None => json!({"configured": false, "model": DEFAULT_AI_MODEL, "key_count": 0}),
     }))
 }
@@ -383,12 +398,18 @@ async fn get_ai_settings(_req: Request) -> Result<Json<JsonValue>, HttpError> {
 async fn set_ai_settings(mut req: Request) -> Result<Json<JsonValue>, HttpError> {
     let input: AiSettingsInput = req.body().json().await.map_err(bad_request)?;
     let settings = normalize_ai_settings(input).map_err(bad_request)?;
-    let serialized = settings.as_ref().map(serde_json::to_string).transpose().map_err(internal)?;
+    let serialized = settings
+        .as_ref()
+        .map(serde_json::to_string)
+        .transpose()
+        .map_err(internal)?;
     prefs::set_prefs(AI_SETTINGS_KEY, serialized)
         .await
         .map_err(internal)?;
     Ok(Json(match settings {
-        Some(settings) => json!({"configured": true, "model": settings.model, "key_count": settings.api_keys.len()}),
+        Some(settings) => {
+            json!({"configured": true, "model": settings.model, "key_count": settings.api_keys.len()})
+        }
         None => json!({"configured": false, "model": DEFAULT_AI_MODEL, "key_count": 0}),
     }))
 }
@@ -400,7 +421,9 @@ async fn create_suggestions(req: Request) -> Result<Json<JsonValue>, HttpError> 
         "SELECT title, destination, start_date, end_date, notes FROM trips WHERE id = ?1 AND EXISTS (SELECT 1 FROM trip_members WHERE trip_id = trips.id AND user_id = ?2 AND role IN ('owner', 'editor'))",
         [Value::Blob(trip_id.clone()), Value::Blob(user_id)],
     ).await.map_err(internal)?;
-    let row = rows.first().ok_or_else(|| HttpError::message(StatusCode::FORBIDDEN, "insufficient trip role"))?;
+    let row = rows
+        .first()
+        .ok_or_else(|| HttpError::message(StatusCode::FORBIDDEN, "insufficient trip role"))?;
     let title = text(row.first().ok_or_else(|| internal("invalid trip"))?)?;
     let destination = text(row.get(1).ok_or_else(|| internal("invalid trip"))?)?;
     let start = text(row.get(2).ok_or_else(|| internal("invalid trip"))?)?;
@@ -413,40 +436,85 @@ async fn create_suggestions(req: Request) -> Result<Json<JsonValue>, HttpError> 
     let itinerary = itinerary_rows.iter().filter_map(|item| {
         Some(json!({"title": text(item.first()?).ok()?, "place": text(item.get(1)?).ok()?, "day": text(item.get(2)?).ok()?, "time": text(item.get(3)?).ok()?}))
     }).collect::<Vec<_>>();
-    let settings = read_ai_settings().await?.ok_or_else(|| HttpError::message(StatusCode::SERVICE_UNAVAILABLE, "AI suggestions haven't been configured."))?;
-    let prompt = suggestion_prompt(title, destination, start, end, notes, &JsonValue::Array(itinerary).to_string());
+    let settings = read_ai_settings().await?.ok_or_else(|| {
+        HttpError::message(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "AI suggestions haven't been configured.",
+        )
+    })?;
+    let prompt = suggestion_prompt(
+        title,
+        destination,
+        start,
+        end,
+        notes,
+        &JsonValue::Array(itinerary).to_string(),
+    );
     let payload = json!({"contents":[{"parts":[{"text":prompt}]}],"tools":[{"googleSearch":{}}],"generationConfig":{"temperature":0.2,"maxOutputTokens":4096}});
     let mut last_status = None;
     for key in ordered_keys(&settings.api_keys, &trip_id) {
         match request_gemini(&settings.model, &key, &payload).await {
-            Ok((status, response)) if status == 200 => match parse_gemini_suggestions(&response, start, end) {
+            Ok((200, response)) => match parse_gemini_suggestions(&response, start, end) {
                 Ok(suggestions) => return Ok(Json(json!({"suggestions": suggestions}))),
-                Err(_) => return Err(HttpError::message(StatusCode::BAD_GATEWAY, "AI returned no usable suggestions.")),
+                Err(_) => {
+                    return Err(HttpError::message(
+                        StatusCode::BAD_GATEWAY,
+                        "AI returned no usable suggestions.",
+                    ));
+                }
             },
             Ok((status, _)) if retryable_provider_status(status) => last_status = Some(status),
-            Ok((_status, _)) => return Err(HttpError::message(StatusCode::BAD_GATEWAY, "AI suggestions could not be generated.")),
+            Ok((_status, _)) => {
+                return Err(HttpError::message(
+                    StatusCode::BAD_GATEWAY,
+                    "AI suggestions could not be generated.",
+                ));
+            }
             Err(_) => last_status = Some(503),
         }
     }
     let _ = last_status;
-    Err(HttpError::message(StatusCode::SERVICE_UNAVAILABLE, "AI suggestions are temporarily unavailable."))
+    Err(HttpError::message(
+        StatusCode::SERVICE_UNAVAILABLE,
+        "AI suggestions are temporarily unavailable.",
+    ))
 }
 
-async fn request_gemini(model: &str, api_key: &str, payload: &JsonValue) -> Result<(u16, JsonValue), String> {
-    let url = format!("https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent");
+async fn request_gemini(
+    model: &str,
+    api_key: &str,
+    payload: &JsonValue,
+) -> Result<(u16, JsonValue), String> {
+    let url =
+        format!("https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent");
     let body = serde_json::to_vec(payload).map_err(|_| "request serialization failed")?;
-    let request = wstd::http::Request::builder().method("POST").uri(url)
-        .header("content-type", "application/json").header("x-goog-api-key", api_key)
-        .body(body.into_body()).map_err(|_| "request build failed")?;
-    let response = wstd::http::Client::new().send(request).await.map_err(|_| "provider request failed")?;
+    let request = wstd::http::Request::builder()
+        .method("POST")
+        .uri(url)
+        .header("content-type", "application/json")
+        .header("x-goog-api-key", api_key)
+        .body(body.into_body())
+        .map_err(|_| "request build failed")?;
+    let response = wstd::http::Client::new()
+        .send(request)
+        .await
+        .map_err(|_| "provider request failed")?;
     let status = response.status().as_u16();
-    let bytes = response.into_body().bytes().await.map_err(|_| "provider response failed")?;
+    let bytes = response
+        .into_body()
+        .bytes()
+        .await
+        .map_err(|_| "provider response failed")?;
     let body = serde_json::from_slice(&bytes).unwrap_or_else(|_| json!({}));
     Ok((status, body))
 }
 
 async fn read_ai_settings() -> Result<Option<AiSettings>, HttpError> {
-    prefs::get_prefs(AI_SETTINGS_KEY).await.map_err(internal)?.map(|value| serde_json::from_str(&value).map_err(internal)).transpose()
+    prefs::get_prefs(AI_SETTINGS_KEY)
+        .await
+        .map_err(internal)?
+        .map(|value| serde_json::from_str(&value).map_err(internal))
+        .transpose()
 }
 
 async fn create_trip(mut req: Request) -> Result<Json<JsonValue>, HttpError> {
@@ -884,10 +952,6 @@ fn invite_email(row: &[Value]) -> Result<InviteEmail, HttpError> {
                 .ok_or_else(|| internal("invalid invitation email"))?,
         )?
         .to_string(),
-        expires: integer(
-            row.get(7)
-                .ok_or_else(|| internal("invalid invitation email"))?,
-        )?,
         attempt: integer(
             row.get(8)
                 .ok_or_else(|| internal("invalid invitation email"))?,
@@ -1344,11 +1408,35 @@ mod tests {
 
     #[test]
     fn normalizes_ai_settings_and_validates_model() {
-        let settings = normalize_ai_settings(AiSettingsInput { api_keys: " a\nb\n a ".to_string(), model: " gemini-2.5-flash-lite ".to_string() }).unwrap().unwrap();
+        let settings = normalize_ai_settings(AiSettingsInput {
+            api_keys: " a\nb\n a ".to_string(),
+            model: " gemini-2.5-flash-lite ".to_string(),
+        })
+        .unwrap()
+        .unwrap();
         assert_eq!(settings.api_keys, vec!["a", "b"]);
         assert_eq!(settings.model, "gemini-2.5-flash-lite");
-        assert!(normalize_ai_settings(AiSettingsInput { api_keys: "key".to_string(), model: "other".to_string() }).is_err());
-        assert!(normalize_ai_settings(AiSettingsInput { api_keys: "key".to_string(), model: "gemini/unsafe".to_string() }).is_err());
-        assert!(normalize_ai_settings(AiSettingsInput { api_keys: " ".to_string(), model: DEFAULT_AI_MODEL.to_string() }).unwrap().is_none());
+        assert!(
+            normalize_ai_settings(AiSettingsInput {
+                api_keys: "key".to_string(),
+                model: "other".to_string()
+            })
+            .is_err()
+        );
+        assert!(
+            normalize_ai_settings(AiSettingsInput {
+                api_keys: "key".to_string(),
+                model: "gemini/unsafe".to_string()
+            })
+            .is_err()
+        );
+        assert!(
+            normalize_ai_settings(AiSettingsInput {
+                api_keys: " ".to_string(),
+                model: DEFAULT_AI_MODEL.to_string()
+            })
+            .unwrap()
+            .is_none()
+        );
     }
 }
