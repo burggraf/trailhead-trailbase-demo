@@ -148,6 +148,17 @@ impl AiSettings {
     }
 }
 
+fn ai_settings_metadata(settings: Option<&AiSettings>) -> JsonValue {
+    match settings {
+        Some(settings) => {
+            json!({"configured": settings.is_configured(), "model": settings.model, "key_count": settings.api_keys.len(), "search_configured": !settings.tavily_api_key.trim().is_empty()})
+        }
+        None => {
+            json!({"configured": false, "model": DEFAULT_AI_MODEL, "key_count": 0, "search_configured": false})
+        }
+    }
+}
+
 #[derive(Clone, Deserialize, Serialize)]
 struct SuggestionSource {
     title: String,
@@ -407,14 +418,7 @@ async fn set_email_settings(mut req: Request) -> Result<Json<JsonValue>, HttpErr
 
 async fn get_ai_settings(_req: Request) -> Result<Json<JsonValue>, HttpError> {
     let settings = read_ai_settings().await?;
-    Ok(Json(match settings {
-        Some(settings) => {
-            json!({"configured": settings.is_configured(), "model": settings.model, "key_count": settings.api_keys.len(), "search_configured": !settings.tavily_api_key.trim().is_empty()})
-        }
-        None => {
-            json!({"configured": false, "model": DEFAULT_AI_MODEL, "key_count": 0, "search_configured": false})
-        }
-    }))
+    Ok(Json(ai_settings_metadata(settings.as_ref())))
 }
 
 async fn set_ai_settings(mut req: Request) -> Result<Json<JsonValue>, HttpError> {
@@ -431,14 +435,7 @@ async fn set_ai_settings(mut req: Request) -> Result<Json<JsonValue>, HttpError>
     prefs::set_prefs(AI_SETTINGS_KEY, serialized)
         .await
         .map_err(internal)?;
-    Ok(Json(match settings {
-        Some(settings) => {
-            json!({"configured": settings.is_configured(), "model": settings.model, "key_count": settings.api_keys.len(), "search_configured": !settings.tavily_api_key.trim().is_empty()})
-        }
-        None => {
-            json!({"configured": false, "model": DEFAULT_AI_MODEL, "key_count": 0, "search_configured": false})
-        }
-    }))
+    Ok(Json(ai_settings_metadata(settings.as_ref())))
 }
 
 async fn create_suggestions(req: Request) -> Result<Json<JsonValue>, HttpError> {
@@ -1523,5 +1520,64 @@ mod tests {
             serde_json::from_str(r#"{"api_keys":["gemini"],"model":"gemini-3.1-flash-lite"}"#)
                 .unwrap();
         assert!(!settings.is_configured());
+        assert_eq!(
+            ai_settings_metadata(Some(&settings)),
+            json!({"configured":false,"model":"gemini-3.1-flash-lite","key_count":1,"search_configured":false})
+        );
+    }
+
+    #[test]
+    fn missing_gemini_keys_with_tavily_removes_settings() {
+        assert!(
+            normalize_ai_settings(AiSettingsInput {
+                api_keys: " ".into(),
+                tavily_api_key: "tavily".into(),
+                model: DEFAULT_AI_MODEL.into()
+            })
+            .unwrap()
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn trims_deduplicates_and_caps_gemini_keys() {
+        let input = (0..12)
+            .map(|i| format!(" k{i} "))
+            .chain(["k0".into(), " k1 ".into()])
+            .collect::<Vec<_>>()
+            .join("\n");
+        let settings = normalize_ai_settings(AiSettingsInput {
+            api_keys: input,
+            tavily_api_key: "tavily".into(),
+            model: DEFAULT_AI_MODEL.into(),
+        })
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            settings.api_keys,
+            (0..10).map(|i| format!("k{i}")).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn metadata_has_exact_safe_shape() {
+        let settings = AiSettings {
+            api_keys: vec!["gemini-secret".into()],
+            tavily_api_key: "tavily-secret".into(),
+            model: DEFAULT_AI_MODEL.into(),
+        };
+        let metadata = ai_settings_metadata(Some(&settings));
+        assert_eq!(
+            metadata,
+            json!({"configured":true,"model":DEFAULT_AI_MODEL,"key_count":1,"search_configured":true})
+        );
+        let serialized = metadata.to_string();
+        assert!(!serialized.contains("gemini-secret"));
+        assert!(!serialized.contains("tavily-secret"));
+    }
+
+    #[test]
+    fn ai_settings_body_limit_is_32_kib() {
+        assert_eq!(MAX_AI_SETTINGS_BODY, 32 * 1024);
     }
 }
