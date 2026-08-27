@@ -16,7 +16,7 @@ struct Trailhead;
 
 const EMAIL_SETTINGS_KEY: &str = "resend-email-settings";
 const AI_SETTINGS_KEY: &str = "gemini-ai-settings";
-const DEFAULT_AI_MODEL: &str = "gemini-2.5-flash-lite";
+const DEFAULT_AI_MODEL: &str = "gemini-3.1-flash-lite";
 const DEV_APP_URL: &str = "http://localhost:5173";
 const MAILPIT_SEND_URL: &str = "http://localhost:8025/api/v1/send";
 const MAX_AI_SETTINGS_BODY: usize = 32 * 1024;
@@ -86,6 +86,8 @@ struct EmailSettings {
 #[derive(Clone, Deserialize, Serialize)]
 struct AiSettings {
     api_keys: Vec<String>,
+    #[serde(default)]
+    tavily_api_key: String,
     model: String,
 }
 
@@ -93,6 +95,8 @@ struct AiSettings {
 struct AiSettingsInput {
     #[serde(default)]
     api_keys: String,
+    #[serde(default)]
+    tavily_api_key: String,
     #[serde(default = "default_ai_model")]
     model: String,
 }
@@ -102,6 +106,10 @@ fn default_ai_model() -> String {
 }
 
 fn normalize_ai_settings(input: AiSettingsInput) -> Result<Option<AiSettings>, String> {
+    let tavily_api_key = input.tavily_api_key.trim().to_string();
+    if tavily_api_key.chars().count() > 512 {
+        return Err("tavily_api_key must be at most 512 characters".to_string());
+    }
     let mut keys = Vec::new();
     for key in input
         .api_keys
@@ -113,7 +121,7 @@ fn normalize_ai_settings(input: AiSettingsInput) -> Result<Option<AiSettings>, S
             keys.push(key.to_string());
         }
     }
-    if keys.is_empty() {
+    if keys.is_empty() || tavily_api_key.is_empty() {
         return Ok(None);
     }
     let model = input.model.trim().to_string();
@@ -129,8 +137,15 @@ fn normalize_ai_settings(input: AiSettingsInput) -> Result<Option<AiSettings>, S
     keys.truncate(10);
     Ok(Some(AiSettings {
         api_keys: keys,
+        tavily_api_key,
         model,
     }))
+}
+
+impl AiSettings {
+    fn is_configured(&self) -> bool {
+        !self.api_keys.is_empty() && !self.tavily_api_key.trim().is_empty()
+    }
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -394,9 +409,11 @@ async fn get_ai_settings(_req: Request) -> Result<Json<JsonValue>, HttpError> {
     let settings = read_ai_settings().await?;
     Ok(Json(match settings {
         Some(settings) => {
-            json!({"configured": true, "model": settings.model, "key_count": settings.api_keys.len()})
+            json!({"configured": settings.is_configured(), "model": settings.model, "key_count": settings.api_keys.len(), "search_configured": !settings.tavily_api_key.trim().is_empty()})
         }
-        None => json!({"configured": false, "model": DEFAULT_AI_MODEL, "key_count": 0}),
+        None => {
+            json!({"configured": false, "model": DEFAULT_AI_MODEL, "key_count": 0, "search_configured": false})
+        }
     }))
 }
 
@@ -416,9 +433,11 @@ async fn set_ai_settings(mut req: Request) -> Result<Json<JsonValue>, HttpError>
         .map_err(internal)?;
     Ok(Json(match settings {
         Some(settings) => {
-            json!({"configured": true, "model": settings.model, "key_count": settings.api_keys.len()})
+            json!({"configured": settings.is_configured(), "model": settings.model, "key_count": settings.api_keys.len(), "search_configured": !settings.tavily_api_key.trim().is_empty()})
         }
-        None => json!({"configured": false, "model": DEFAULT_AI_MODEL, "key_count": 0}),
+        None => {
+            json!({"configured": false, "model": DEFAULT_AI_MODEL, "key_count": 0, "search_configured": false})
+        }
     }))
 }
 
@@ -444,12 +463,15 @@ async fn create_suggestions(req: Request) -> Result<Json<JsonValue>, HttpError> 
     let itinerary = itinerary_rows.iter().filter_map(|item| {
         Some(json!({"title": text(item.first()?).ok()?, "place": text(item.get(1)?).ok()?, "day": text(item.get(2)?).ok()?, "time": text(item.get(3)?).ok()?}))
     }).collect::<Vec<_>>();
-    let settings = read_ai_settings().await?.ok_or_else(|| {
-        HttpError::message(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "AI suggestions haven't been configured.",
-        )
-    })?;
+    let settings = read_ai_settings()
+        .await?
+        .filter(AiSettings::is_configured)
+        .ok_or_else(|| {
+            HttpError::message(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "AI suggestions haven't been configured.",
+            )
+        })?;
     let itinerary = JsonValue::Array(itinerary).to_string();
     let prompt = suggestion_prompt(
         &bounded_text(title, MAX_AI_FIELD_CHARS),
@@ -1440,18 +1462,26 @@ mod tests {
     }
 
     #[test]
+    fn defaults_to_current_grounded_flash_lite_model() {
+        assert_eq!(DEFAULT_AI_MODEL, "gemini-3.1-flash-lite");
+    }
+
+    #[test]
     fn normalizes_ai_settings_and_validates_model() {
         let settings = normalize_ai_settings(AiSettingsInput {
             api_keys: " a\nb\n a ".to_string(),
+            tavily_api_key: " tavily-key ".to_string(),
             model: " gemini-2.5-flash-lite ".to_string(),
         })
         .unwrap()
         .unwrap();
         assert_eq!(settings.api_keys, vec!["a", "b"]);
+        assert_eq!(settings.tavily_api_key, "tavily-key");
         assert_eq!(settings.model, "gemini-2.5-flash-lite");
         assert!(
             normalize_ai_settings(AiSettingsInput {
                 api_keys: "key".to_string(),
+                tavily_api_key: "tavily".to_string(),
                 model: "other".to_string()
             })
             .is_err()
@@ -1459,17 +1489,39 @@ mod tests {
         assert!(
             normalize_ai_settings(AiSettingsInput {
                 api_keys: "key".to_string(),
+                tavily_api_key: "tavily".to_string(),
                 model: "gemini/unsafe".to_string()
             })
             .is_err()
         );
+    }
+
+    #[test]
+    fn requires_tavily_and_limits_its_key() {
         assert!(
             normalize_ai_settings(AiSettingsInput {
-                api_keys: " ".to_string(),
+                api_keys: "gemini".to_string(),
+                tavily_api_key: " ".to_string(),
                 model: DEFAULT_AI_MODEL.to_string()
             })
             .unwrap()
             .is_none()
         );
+        assert!(
+            normalize_ai_settings(AiSettingsInput {
+                api_keys: "gemini".to_string(),
+                tavily_api_key: "x".repeat(513),
+                model: DEFAULT_AI_MODEL.to_string()
+            })
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn old_settings_without_tavily_are_not_configured() {
+        let settings: AiSettings =
+            serde_json::from_str(r#"{"api_keys":["gemini"],"model":"gemini-3.1-flash-lite"}"#)
+                .unwrap();
+        assert!(!settings.is_configured());
     }
 }
