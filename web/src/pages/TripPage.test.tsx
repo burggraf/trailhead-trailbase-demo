@@ -2,17 +2,29 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
-import { Members } from './TripPage'
+import { Itinerary, Members } from './TripPage'
+import type { Trip } from '../types'
 
 const mocks = vi.hoisted(() => ({ extension: vi.fn(), create: vi.fn(), update: vi.fn(), remove: vi.fn() }))
 vi.mock('../lib/trailbase', () => ({
   client: {
     base: new URL('http://localhost:4000'),
-    records: () => ({ create: mocks.create, update: mocks.update, delete: mocks.remove, list: vi.fn() }),
+    records: (name: string) => ({ create: (...args: unknown[]) => mocks.create(name, ...args), update: (...args: unknown[]) => mocks.update(name, ...args), delete: (...args: unknown[]) => mocks.remove(name, ...args), list: vi.fn().mockResolvedValue({ records: [] }), read: vi.fn() }),
   },
   extension: mocks.extension,
   recordFileUrl: vi.fn(),
 }))
+
+const trip: Trip = { id: 'trip-1', owner: 'u1', title: 'Trip', destination: 'Rome', start_date: '2026-10-01', end_date: '2026-10-04', status: 'planning', notes: '', latitude: null, longitude: null, cover: null, created: 0, updated: 0 }
+
+describe('Itinerary suggestions', () => {
+  it('hides suggestions for viewers and disables duplicate editor searches', async () => {
+    const queryClient = new QueryClient(); const page = render(<QueryClientProvider client={queryClient}><Itinerary trip={trip} userId="u1" items={[]} canEdit={false} invalidate={vi.fn()} /></QueryClientProvider>)
+    expect(page.queryByText('Suggest things to do')).toBeNull()
+    page.rerender(<QueryClientProvider client={queryClient}><Itinerary trip={trip} userId="u1" items={[]} canEdit={true} invalidate={vi.fn()} /></QueryClientProvider>)
+    mocks.extension.mockReturnValue(new Promise(() => undefined)); fireEvent.click(page.getByText('Suggest things to do')); expect(await page.findByRole('status')).toHaveTextContent('Searching for events and local attractions…'); expect(page.getByText('Suggest things to do').closest('button')).toBeDisabled()
+  })
+})
 
 describe('trip owner invitations', () => {
   it('shows delivery status and lets the owner resend or cancel', async () => {
