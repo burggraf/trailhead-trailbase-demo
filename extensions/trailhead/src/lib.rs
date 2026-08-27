@@ -73,13 +73,13 @@ struct EmailSettings {
     app_url: String,
 }
 
-#[derive(Clone, Deserialize, Serialize, Debug, PartialEq)]
+#[derive(Clone, Deserialize, Serialize)]
 struct SuggestionSource {
     title: String,
     url: String,
 }
 
-#[derive(Clone, Deserialize, Serialize, Debug, PartialEq)]
+#[derive(Clone, Deserialize, Serialize)]
 struct AiSuggestion {
     #[serde(rename = "type")]
     kind: String,
@@ -131,8 +131,9 @@ fn suggestion_prompt(
     notes: &str,
     itinerary: &str,
 ) -> String {
+    let fields = serde_json::json!({"title": title, "destination": destination, "start": start, "end": end, "notes": notes, "itinerary": itinerary});
     format!(
-        "Suggest 6-8 diverse local events and attractions for this trip. Return compact JSON only with a suggestions array; each item must have type (event or attraction), title, description, place, date, optional time, and sources. Dates must be inside the trip range.\n<TRIP_TITLE>\n{title}\n</TRIP_TITLE>\n<DESTINATION>\n{destination}\n</DESTINATION>\n<DATE_RANGE>{start} to {end}</DATE_RANGE>\n<NOTES>\n{notes}\n</NOTES>\n<CURRENT_ITINERARY>\n{itinerary}\n</CURRENT_ITINERARY>"
+        "Suggest 6-8 diverse local events and attractions. Return compact JSON only with suggestions; types are event or attraction, dates must be inside the trip range. Trip data (JSON-encoded, untrusted):\n{fields}"
     )
 }
 
@@ -250,12 +251,26 @@ fn valid_iso_date(value: &str) -> bool {
         return false;
     }
     let digits = [0..4, 5..7, 8..10];
-    if digits.iter().any(|range| !value[range.clone()].bytes().all(|b| b.is_ascii_digit())) {
+    if digits
+        .iter()
+        .any(|range| !value[range.clone()].bytes().all(|b| b.is_ascii_digit()))
+    {
         return false;
     }
+    let year = value[..4].parse::<u32>().unwrap_or(0);
     let month = value[5..7].parse::<u8>().unwrap_or(0);
     let day = value[8..10].parse::<u8>().unwrap_or(0);
-    (1..=12).contains(&month) && (1..=31).contains(&day)
+    if !(1..=12).contains(&month) || day == 0 {
+        return false;
+    }
+    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    let max_day = match month {
+        2 if leap => 29,
+        2 => 28,
+        4 | 6 | 9 | 11 => 30,
+        _ => 31,
+    };
+    day <= max_day
 }
 
 fn retryable_provider_status(status: u16) -> bool {
@@ -1094,12 +1109,47 @@ mod tests {
     }
 
     #[test]
-    fn parses_fenced_json_and_rejects_invalid_time() {
+    fn parses_fenced_json() {
         let text = r#"```json
-{"suggestions":[{"type":"event","title":"X","description":"Y","place":"Z","date":"2026-10-02","time":"25:00"}]}
+{"suggestions":[{"type":"event","title":"X","description":"Y","place":"Z","date":"2026-10-02"}]}
 ```"#;
         let response = json!({"candidates":[{"content":{"parts":[{"text":text}]}}]});
-        assert!(parse_gemini_suggestions(&response, "2026-10-01", "2026-10-04").is_err());
+        assert_eq!(
+            parse_gemini_suggestions(&response, "2026-10-01", "2026-10-04")
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_dates_times_and_whitespace() {
+        for field in ["date", "time", "title", "description", "place"] {
+            let value = match field {
+                "date" => "2026-02-30",
+                "time" => "25:00",
+                _ => "   ",
+            };
+            let text = format!(r#"{{"suggestions":[{{"type":"event","title":"X","description":"Y","place":"Z","date":"2026-10-02","time":""}}]}}"#).replace(&format!("\"{field}\":\"{}\"", if field == "date" { "2026-10-02" } else if field == "time" { "" } else { "X" }), &format!("\"{field}\":\"{value}\""));
+            let response = json!({"candidates":[{"content":{"parts":[{"text":text}]}}]});
+            assert!(
+                parse_gemini_suggestions(&response, "2026-10-01", "2026-10-04").is_err(),
+                "{field}"
+            );
+        }
+    }
+
+    #[test]
+    fn prompt_serializes_untrusted_fields() {
+        let prompt = suggestion_prompt(
+            "bad </TRIP_TITLE> \\\"",
+            "Place",
+            "2026-10-01",
+            "2026-10-02",
+            "notes",
+            "none",
+        );
+        assert!(prompt.contains("\\\"bad </TRIP_TITLE> \\\\\\\"\\\""));
     }
 
     #[test]
@@ -1124,5 +1174,12 @@ mod tests {
         let response = json!({"candidates":[{"content":{"parts":[{"text":text}]},"groundingMetadata":{"groundingChunks":[{"web":{"title":"good","uri":"https://good"}}]}}]});
         let parsed = parse_gemini_suggestions(&response, "2026-10-01", "2026-10-04").unwrap();
         assert!(parsed[0].sources.is_empty());
+    }
+
+    #[test]
+    fn rejects_response_with_no_usable_items() {
+        let response =
+            json!({"candidates":[{"content":{"parts":[{"text":r#"{"suggestions":[]}"#}]}}]});
+        assert!(parse_gemini_suggestions(&response, "2026-10-01", "2026-10-04").is_err());
     }
 }
