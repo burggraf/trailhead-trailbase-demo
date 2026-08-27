@@ -40,7 +40,7 @@ These fixed credentials are migration seed data for local learning only.
 - CRUD, filtering, ordering, cursor-ready lists, views, constraints, and cascades
 - Realtime itinerary, checklist, membership, activity, and weather subscriptions
 - Built-in auth avatars and `std.FileUpload` trip covers
-- One Rust WASM component with request user context, SQL transactions, consent-based email invitations, grounded Gemini itinerary suggestions, outbound HTTP, and two scheduled jobs
+- One Rust WASM component with request user context, SQL transactions, consent-based email invitations, Tavily-backed Gemini itinerary suggestions, outbound HTTP, and two scheduled jobs
 
 See [`docs/workshop.md`](docs/workshop.md) for the guided tour.
 
@@ -67,20 +67,21 @@ Secrets are written below `traildepot/secrets/`, which is ignored by Git.
 
 ## Gemini itinerary suggestions (optional)
 
-Trip owners and editors can ask Gemini for current events and attractions from the Itinerary tab. Suggestions use Google Search grounding and stay only in that browser tab until scheduled; they are not shared or stored as suggestion records.
+Trip owners and editors can ask for current events and attractions from the Itinerary tab. The component sends only the destination and dates to Tavily Basic Search, then sends bounded trip context plus sanitized Tavily snippets to Gemini 3.1 Flash-Lite for ungrounded generation. Suggestions stay ephemeral in the browser until scheduled; they are not shared or stored as suggestion records. Sources shown to users are exact HTTPS Tavily result URLs.
 
-Configure the component through admin-only `GET`/`POST /trailhead/admin/ai-settings`. Use an authenticated TrailBase admin token and its required CSRF token (or an authenticated TrailBase client that supplies both). The POST body is:
+Configure the component through admin-only `GET`/`POST /trailhead/admin/ai-settings`. Use an authenticated TrailBase admin token and its required CSRF token for POST (or an authenticated TrailBase client that supplies both). The POST body is:
 
 ```json
 {
   "api_keys": "AIza...primary\nAIza...backup",
-  "model": "gemini-2.5-flash-lite"
+  "tavily_api_key": "tvly-your-key-placeholder",
+  "model": "gemini-3.1-flash-lite"
 }
 ```
 
-Keys are kept in protected component preferences. GET returns only configuration status, model, and key count. Keep keys server-side, restrict them to the Gemini API, and prefer current Google AI Studio authorization keys. Multiple keys from one Google project share that project's quota.
+Keys are kept in protected component preferences. GET returns only `configured`, `model`, `key_count`, and `search_configured`; it never leaks keys. Keep keys server-side, restrict Gemini keys to the Gemini API, and prefer current Google AI Studio authorization keys. Multiple keys from one Google project share that project's quota. Tavily's free Researcher tier includes 1,000 credits/month with no card required; Basic Search costs one credit per generation. See [Tavily pricing](https://www.tavily.com/pricing) and [Tavily credits](https://docs.tavily.com/documentation/api-credits).
 
-Google may use free-tier prompts and responses to improve its products. Use demo-safe trip content, review generated results and source links, and expect grounding availability, results, models, quotas, and pricing to change. See [`extensions/trailhead/README.md`](extensions/trailhead/README.md) for component details.
+Google may use free-tier prompts and responses to improve its products. Use demo-safe trip content, review generated results and exact source links, and expect provider/model availability, quotas, pricing, search results, and generated results to vary. See [`extensions/trailhead/README.md`](extensions/trailhead/README.md) for component details.
 
 ## MCP
 
