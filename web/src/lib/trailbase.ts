@@ -59,7 +59,13 @@ export function authUi(path: string, redirect = window.location.origin) {
 
 export async function extension<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await client.fetch(`/trailhead${path}`, init)
-  return response.json() as Promise<T>
+  if (response.ok) return response.json() as Promise<T>
+
+  const body = (await response.text()).slice(0, 8192)
+  let error: { message?: unknown; msg?: unknown } | undefined
+  try { error = JSON.parse(body) as typeof error } catch { /* use status fallback */ }
+  const message = typeof error?.message === 'string' ? error.message : error?.msg
+  throw new Error(typeof message === 'string' ? message : `Request failed (${response.status})`)
 }
 
 export function recordFileUrl(api: string, id: string, column: string) {
