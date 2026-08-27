@@ -59,6 +59,15 @@ grep -q 'Innsbruck & Tyrol' <<<"$BOB_MAIL_TEXT" || { echo "Plain-text invitation
 
 request "$BOB" POST "/trailhead/invites/$BOB_INVITE/accept" >/dev/null
 request "$CAROL" POST "/trailhead/invites/$CAROL_INVITE/accept" >/dev/null
+OWNER_AI_STATUS="$(curl -sS -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $ALICE" "$BASE/trailhead/trips/$TRIP/suggestions")"
+EDITOR_AI_STATUS="$(curl -sS -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $BOB" "$BASE/trailhead/trips/$TRIP/suggestions")"
+VIEWER_AI_STATUS="$(curl -sS -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $CAROL" "$BASE/trailhead/trips/$TRIP/suggestions")"
+OUTSIDER_AI_STATUS="$(curl -sS -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $EVE" "$BASE/trailhead/trips/$TRIP/suggestions")"
+[[ "$OWNER_AI_STATUS" == "503" && "$EDITOR_AI_STATUS" == "503" ]] || { echo "Expected unconfigured AI 503 for planners" >&2; exit 1; }
+[[ "$VIEWER_AI_STATUS" == "403" && "$OUTSIDER_AI_STATUS" == "403" ]] || { echo "Expected AI suggestion authorization denial" >&2; exit 1; }
+ADMIN_AI_SETTINGS_STATUS="$(curl -sS -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $ALICE" "$BASE/trailhead/admin/ai-settings")"
+[[ "$ADMIN_AI_SETTINGS_STATUS" == "403" ]] || { echo "Expected non-admin AI settings 403, got $ADMIN_AI_SETTINGS_STATUS" >&2; exit 1; }
+
 EXISTING_MEMBER_STATUS="$(curl -sS -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $ALICE" -H 'Content-Type: application/json' -d '{"email":"bob@example.com","role":"viewer"}' "$BASE/trailhead/trips/$TRIP/invites")"
 [[ "$EXISTING_MEMBER_STATUS" == 409 ]] || { echo "Expected existing-member invitation 409, got $EXISTING_MEMBER_STATUS" >&2; exit 1; }
 
