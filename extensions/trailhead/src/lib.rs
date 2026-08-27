@@ -1247,7 +1247,6 @@ mod tests {
             destination: "A&B".to_string(),
             inviter_name: "Alice".to_string(),
             account_state: "new".to_string(),
-            expires: 1,
             attempt: 1,
         };
         let (_, html, text) = invitation_message(&invite, DEV_APP_URL);
