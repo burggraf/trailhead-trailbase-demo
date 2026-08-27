@@ -22,7 +22,7 @@ describe('Itinerary suggestions', () => {
     const queryClient = new QueryClient(); const page = render(<QueryClientProvider client={queryClient}><Itinerary trip={trip} userId="u1" items={[]} canEdit={false} invalidate={vi.fn()} /></QueryClientProvider>)
     expect(page.queryByText('Suggest things to do')).toBeNull()
     page.rerender(<QueryClientProvider client={queryClient}><Itinerary trip={trip} userId="u1" items={[]} canEdit={true} invalidate={vi.fn()} /></QueryClientProvider>)
-    mocks.extension.mockReturnValue(new Promise(() => undefined)); fireEvent.click(page.getByText('Suggest things to do')); expect(await page.findByRole('status')).toHaveTextContent('Searching for events and local attractions…'); expect(page.getByText('Suggest things to do').closest('button')).toBeDisabled()
+    mocks.extension.mockReturnValue(new Promise(() => undefined)); fireEvent.click(page.getByText('Suggest things to do')); expect((await page.findByRole('status')).textContent).toContain('Searching for events and local attractions…'); expect((page.getByText('Suggest things to do').closest('button') as HTMLButtonElement).disabled).toBe(true)
   })
 })
 
