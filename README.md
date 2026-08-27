@@ -40,7 +40,7 @@ These fixed credentials are migration seed data for local learning only.
 - CRUD, filtering, ordering, cursor-ready lists, views, constraints, and cascades
 - Realtime itinerary, checklist, membership, activity, and weather subscriptions
 - Built-in auth avatars and `std.FileUpload` trip covers
-- One Rust WASM component with request user context, SQL transactions, consent-based email invitations, outbound HTTP, and two scheduled jobs
+- One Rust WASM component with request user context, SQL transactions, consent-based email invitations, grounded Gemini itinerary suggestions, outbound HTTP, and two scheduled jobs
 
 See [`docs/workshop.md`](docs/workshop.md) for the guided tour.
 
@@ -64,6 +64,23 @@ docs/                        Design, plan, and workshop
 5. Use **Google, OTP, or MFA** on Trailhead’s login screen.
 
 Secrets are written below `traildepot/secrets/`, which is ignored by Git.
+
+## Gemini itinerary suggestions (optional)
+
+Trip owners and editors can ask Gemini for current events and attractions from the Itinerary tab. Suggestions use Google Search grounding and stay only in that browser tab until scheduled; they are not shared or stored as suggestion records.
+
+Configure the component through admin-only `GET`/`POST /trailhead/admin/ai-settings`. Use an authenticated TrailBase admin token and its required CSRF token (or an authenticated TrailBase client that supplies both). The POST body is:
+
+```json
+{
+  "api_keys": "AIza...primary\nAIza...backup",
+  "model": "gemini-2.5-flash-lite"
+}
+```
+
+Keys are kept in protected component preferences. GET returns only configuration status, model, and key count. Keep keys server-side, restrict them to the Gemini API, and prefer current Google AI Studio authorization keys. Multiple keys from one Google project share that project's quota.
+
+Google may use free-tier prompts and responses to improve its products. Use demo-safe trip content, review generated results and source links, and expect grounding availability, results, models, quotas, and pricing to change. See [`extensions/trailhead/README.md`](extensions/trailhead/README.md) for component details.
 
 ## MCP
 

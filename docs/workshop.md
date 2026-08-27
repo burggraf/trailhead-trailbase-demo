@@ -87,11 +87,30 @@ SQLite stores metadata while TrailBase stores bytes under `traildepot/uploads/` 
 | `POST /trailhead/invites/{id}/accept` | consent and membership transaction |
 | `DELETE /trailhead/invites/{id}` | explicit recipient decline |
 | invitation resend/cancel routes | owner authorization and revocation |
+| `GET/POST /trailhead/admin/ai-settings` | admin-only protected Gemini configuration |
+| `POST /trailhead/trips/{id}/suggestions` | owner/editor authorization, Gemini, and Google Search grounding |
 | `POST /trailhead/trips/{id}/briefing` | membership, outbound HTTP, DB upsert |
 | hourly weather job | system context and bounded batch work |
 | daily invite cleanup | scheduled maintenance |
 
 The component calls Mailpit locally or Resend when protected production settings exist. Delivery failure leaves the invitation available in-app for manual resend. It also calls Nominatim with an identifying User-Agent, then Open-Meteo; weather-provider failures leave the previous briefing intact. Jobs have no request user, so their SQL is deliberately narrow.
+
+### Grounded itinerary suggestions
+
+Configure the optional demo from an authenticated TrailBase admin client. `GET` and `POST /trailhead/admin/ai-settings` require an admin token; POST also requires the matching CSRF protection:
+
+```json
+{
+  "api_keys": "AIza...primary\nAIza...backup",
+  "model": "gemini-2.5-flash-lite"
+}
+```
+
+The keys stay in protected component preferences, and GET exposes only configuration status, model, and key count. Keep them out of source control, browser code, logs, chat, and command history. Restrict keys to the Gemini API and prefer current Google AI Studio authorization keys. Gemini quota is assigned per Google project rather than per key, so same-project failover keys do not increase quota.
+
+Open a trip as Alice or Bob and choose **Suggest things to do** on the Itinerary tab. The component authorizes the owner/editor role, sends bounded trip context to Gemini with Google Search grounding, validates the response, and returns temporary cards. Dismiss or clear cards, or edit a card's title, place, date, and optional time before scheduling it. Carol and Eve cannot generate or schedule suggestions. Only scheduled itinerary and activity records persist; unscheduled suggestions remain ephemeral browser state and are not shared.
+
+For workshop data, remember that Google may use free-tier prompts and responses to improve its products. Generated results require review, and model availability, quota, pricing, Search grounding availability, source links, and event details can change.
 
 Rebuild manually with:
 
