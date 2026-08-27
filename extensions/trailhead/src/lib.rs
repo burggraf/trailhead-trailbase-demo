@@ -404,7 +404,7 @@ async fn set_ai_settings(mut req: Request) -> Result<Json<JsonValue>, HttpError>
     let body = bounded_body(req.body(), MAX_AI_SETTINGS_BODY)
         .await
         .map_err(bad_request)?;
-    let input: AiSettingsInput = serde_json::from_slice(&body).map_err(bad_request)?
+    let input: AiSettingsInput = serde_json::from_slice(&body).map_err(bad_request)?;
     let settings = normalize_ai_settings(input).map_err(bad_request)?;
     let serialized = settings
         .as_ref()
