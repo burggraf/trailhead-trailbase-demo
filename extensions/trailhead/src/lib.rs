@@ -1344,7 +1344,7 @@ mod tests {
 
     #[test]
     fn normalizes_ai_settings_and_validates_model() {
-        let settings = normalize_ai_settings(AiSettingsInput { api_keys: " a\\nb\\n a ".to_string(), model: " gemini-2.5-flash-lite ".to_string() }).unwrap().unwrap();
+        let settings = normalize_ai_settings(AiSettingsInput { api_keys: " a\nb\n a ".to_string(), model: " gemini-2.5-flash-lite ".to_string() }).unwrap().unwrap();
         assert_eq!(settings.api_keys, vec!["a", "b"]);
         assert_eq!(settings.model, "gemini-2.5-flash-lite");
         assert!(normalize_ai_settings(AiSettingsInput { api_keys: "key".to_string(), model: "other".to_string() }).is_err());
