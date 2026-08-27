@@ -9,7 +9,8 @@ use trailbase_wasm::fetch;
 use trailbase_wasm::http::{HttpError, HttpRoute, Json, Request, StatusCode, routing};
 use trailbase_wasm::job::Job;
 use trailbase_wasm::{Guest, export, prefs};
-use wstd::http::body::IntoBody;
+use wstd::http::body::{Body, IncomingBody, IntoBody};
+use wstd::io::AsyncRead;
 
 struct Trailhead;
 
@@ -18,6 +19,10 @@ const AI_SETTINGS_KEY: &str = "gemini-ai-settings";
 const DEFAULT_AI_MODEL: &str = "gemini-2.5-flash-lite";
 const DEV_APP_URL: &str = "http://localhost:5173";
 const MAILPIT_SEND_URL: &str = "http://localhost:8025/api/v1/send";
+const MAX_AI_SETTINGS_BODY: usize = 32 * 1024;
+const MAX_GEMINI_RESPONSE_BODY: usize = 512 * 1024;
+const MAX_AI_PROMPT_BYTES: usize = 32 * 1024;
+const MAX_AI_FIELD_CHARS: usize = 5_000;
 
 impl Guest for Trailhead {
     fn http_handlers() -> Vec<HttpRoute> {
@@ -396,7 +401,10 @@ async fn get_ai_settings(_req: Request) -> Result<Json<JsonValue>, HttpError> {
 }
 
 async fn set_ai_settings(mut req: Request) -> Result<Json<JsonValue>, HttpError> {
-    let input: AiSettingsInput = req.body().json().await.map_err(bad_request)?;
+    let body = bounded_body(req.body(), MAX_AI_SETTINGS_BODY)
+        .await
+        .map_err(bad_request)?;
+    let input: AiSettingsInput = serde_json::from_slice(&body).map_err(bad_request)?
     let settings = normalize_ai_settings(input).map_err(bad_request)?;
     let serialized = settings
         .as_ref()
@@ -442,14 +450,21 @@ async fn create_suggestions(req: Request) -> Result<Json<JsonValue>, HttpError> 
             "AI suggestions haven't been configured.",
         )
     })?;
+    let itinerary = JsonValue::Array(itinerary).to_string();
     let prompt = suggestion_prompt(
-        title,
-        destination,
+        &bounded_text(title, MAX_AI_FIELD_CHARS),
+        &bounded_text(destination, MAX_AI_FIELD_CHARS),
         start,
         end,
-        notes,
-        &JsonValue::Array(itinerary).to_string(),
+        &bounded_text(notes, MAX_AI_FIELD_CHARS),
+        &bounded_text(&itinerary, MAX_AI_FIELD_CHARS * 4),
     );
+    if prompt.len() > MAX_AI_PROMPT_BYTES {
+        return Err(HttpError::message(
+            StatusCode::BAD_REQUEST,
+            "trip details are too large for AI suggestions",
+        ));
+    }
     let payload = json!({"contents":[{"parts":[{"text":prompt}]}],"tools":[{"googleSearch":{}}],"generationConfig":{"temperature":0.2,"maxOutputTokens":4096}});
     let mut last_status = None;
     for key in ordered_keys(&settings.api_keys, &trip_id) {
@@ -500,13 +515,32 @@ async fn request_gemini(
         .await
         .map_err(|_| "provider request failed")?;
     let status = response.status().as_u16();
-    let bytes = response
-        .into_body()
-        .bytes()
-        .await
-        .map_err(|_| "provider response failed")?;
+    let mut response_body = response.into_body();
+    let bytes = bounded_body(&mut response_body, MAX_GEMINI_RESPONSE_BODY).await?;
     let body = serde_json::from_slice(&bytes).unwrap_or_else(|_| json!({}));
     Ok((status, body))
+}
+
+async fn bounded_body(body: &mut IncomingBody, limit: usize) -> Result<Vec<u8>, String> {
+    let mut bytes = Vec::with_capacity(body.len().unwrap_or_default().min(limit));
+    let mut chunk = [0_u8; 2048];
+    loop {
+        let read = body
+            .read(&mut chunk)
+            .await
+            .map_err(|_| "request body could not be read".to_string())?;
+        if read == 0 {
+            return Ok(bytes);
+        }
+        if bytes.len() + read > limit {
+            return Err("request body is too large".to_string());
+        }
+        bytes.extend_from_slice(&chunk[..read]);
+    }
+}
+
+fn bounded_text(value: &str, max_chars: usize) -> String {
+    value.chars().take(max_chars).collect()
 }
 
 async fn read_ai_settings() -> Result<Option<AiSettings>, HttpError> {
