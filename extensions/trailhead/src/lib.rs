@@ -611,12 +611,8 @@ async fn create_suggestions(req: Request) -> Result<Json<JsonValue>, HttpError> 
     let destination = bounded_text(&destination, MAX_AI_FIELD_CHARS);
     let notes = bounded_text(&notes, MAX_AI_FIELD_CHARS);
     let itinerary = bounded_text(&itinerary, MAX_AI_FIELD_CHARS * 4);
-    suggestion_preflight(&title, &destination, &start, &end, &notes, &itinerary).map_err(|_| {
-        HttpError::message(
-            StatusCode::BAD_REQUEST,
-            "trip details are too large for AI suggestions",
-        )
-    })?;
+    suggestion_preflight(&title, &destination, &start, &end, &notes, &itinerary)
+        .map_err(|error| HttpError::message(StatusCode::BAD_REQUEST, error))?;
     let query = tavily_query(&destination, &start, &end);
     let tavily = request_tavily(&settings.tavily_api_key, &query)
         .await
@@ -1867,8 +1863,14 @@ mod tests {
     #[test]
     fn preflight_reserves_room_and_results_fit_prompt_budget() {
         let huge = "x".repeat(MAX_AI_FIELD_CHARS * 4);
-        assert!(
-            suggestion_preflight(&huge, "Paris", "2026-01-01", "2026-01-02", &huge, &huge).is_err()
+        assert_eq!(
+            suggestion_preflight(&huge, "Paris", "2026-01-01", "2026-01-02", &huge, &huge)
+                .unwrap_err(),
+            "trip details are too large for AI suggestions"
+        );
+        assert_eq!(
+            suggestion_preflight("t", "d", "2026-02-30", "2026-03-01", "n", "i").unwrap_err(),
+            "invalid trip dates"
         );
         let results = vec![
             TavilyResult {
