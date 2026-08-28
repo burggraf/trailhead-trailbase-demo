@@ -69,7 +69,15 @@ Secrets are written below `traildepot/secrets/`, which is ignored by Git.
 
 Trip owners and editors can ask for current events and attractions from the Itinerary tab. The component sends only the destination and dates to Tavily Basic Search, then sends bounded trip context plus bounded Tavily snippets treated as untrusted data to Gemini 3.1 Flash-Lite for ungrounded generation. Suggestions stay ephemeral in the browser until scheduled; they are not shared or stored as suggestion records. Sources shown to users are validated, normalized HTTPS Tavily URLs allowlisted by matching Tavily title and URL.
 
-Configure the component through admin-only `GET`/`POST /trailhead/admin/ai-settings`. Use an authenticated TrailBase admin token and its required CSRF token for POST (or an authenticated TrailBase client that supplies both). The POST body is:
+The preferred setup works the same locally and in production:
+
+1. Sign in to Trailhead with a TrailBase administrator account. For a new local depot, TrailBase prints the generated `admin@localhost` password on first startup.
+2. Open **Account settings → AI provider settings**.
+3. Enter a primary Gemini key, an optional backup Gemini key, a Tavily key, and the model, then save.
+
+Existing keys are write-only and are never loaded into the form. Saving replaces the complete configuration, so re-enter every key you want to keep. The card also shows safe configuration status and provides a confirmed removal action.
+
+For deployment automation, the same interface is available through admin-only `GET`/`POST /trailhead/admin/ai-settings`. Use an authenticated TrailBase admin client so its bearer and CSRF tokens are supplied. The POST body is:
 
 ```json
 {
@@ -79,7 +87,7 @@ Configure the component through admin-only `GET`/`POST /trailhead/admin/ai-setti
 }
 ```
 
-Keys are kept in protected component preferences. GET returns only `configured`, `model`, `key_count`, and `search_configured`; it never leaks keys. Keep keys server-side, restrict Gemini keys to the Gemini API, and prefer current Google AI Studio authorization keys. Multiple keys from one Google project share that project's quota. Tavily's free Researcher tier includes 1,000 credits/month with no card required; Basic Search costs one credit per generation. See [Tavily pricing](https://www.tavily.com/pricing) and [Tavily credits](https://docs.tavily.com/documentation/api-credits).
+Configure each deployed TrailBase data volume separately; credentials are not bundled into the SPA or WASM build. Keys are kept in protected component preferences. GET returns only `configured`, `model`, `key_count`, and `search_configured`; it never leaks keys. Keep keys server-side, restrict Gemini keys to the Gemini API, and prefer current Google AI Studio authorization keys. Multiple keys from one Google project share that project's quota. Tavily's free Researcher tier includes 1,000 credits/month with no card required; Basic Search costs one credit per generation. See [Tavily pricing](https://www.tavily.com/pricing) and [Tavily credits](https://docs.tavily.com/documentation/api-credits).
 
 Google may use free-tier prompts and responses to improve its products. Use demo-safe trip content, review generated results and validated source links, and expect provider/model availability, quotas, pricing, search results, and generated results to vary. See [`extensions/trailhead/README.md`](extensions/trailhead/README.md) for component details.
 

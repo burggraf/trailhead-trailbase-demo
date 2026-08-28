@@ -97,7 +97,9 @@ The component calls Mailpit locally or Resend when protected production settings
 
 ### Tavily itinerary search and Gemini suggestions
 
-Configure the optional demo from an authenticated TrailBase admin client. `GET` and `POST /trailhead/admin/ai-settings` require an admin token; POST also requires the matching CSRF token:
+Configure the optional demo by signing in to Trailhead as a TrailBase administrator and opening **Account settings → AI provider settings**. For a new local depot, TrailBase prints the generated `admin@localhost` password on first startup. The same card works on a deployed origin; configure each deployment separately because credentials live in its TrailBase data volume and are not bundled into the application build.
+
+For automation, `GET` and `POST /trailhead/admin/ai-settings` require an admin token; POST also requires the matching CSRF token:
 
 ```json
 {
@@ -107,7 +109,7 @@ Configure the optional demo from an authenticated TrailBase admin client. `GET` 
 }
 ```
 
-The keys stay in protected component preferences. GET exposes only `configured`, `model`, `key_count`, and `search_configured`; it never exposes keys. Keep secrets out of source control, browser code, logs, chat, and command history. Restrict Gemini keys to the Gemini API and prefer current Google AI Studio authorization keys. Gemini quota is assigned per Google project rather than per key, so same-project failover keys do not increase quota. Tavily's free Researcher tier includes 1,000 credits/month with no card required; Basic Search costs one credit per generation. See [Tavily pricing](https://www.tavily.com/pricing) and [Tavily credits](https://docs.tavily.com/documentation/api-credits).
+The UI never reloads existing secrets: saving replaces the complete configuration, so every key to retain must be re-entered. The keys stay in protected component preferences. GET exposes only `configured`, `model`, `key_count`, and `search_configured`; it never exposes keys. Keep secrets out of source control, browser code, logs, chat, and command history. Restrict Gemini keys to the Gemini API and prefer current Google AI Studio authorization keys. Gemini quota is assigned per Google project rather than per key, so same-project failover keys do not increase quota. Tavily's free Researcher tier includes 1,000 credits/month with no card required; Basic Search costs one credit per generation. See [Tavily pricing](https://www.tavily.com/pricing) and [Tavily credits](https://docs.tavily.com/documentation/api-credits).
 
 Open a trip as Alice or Bob and choose **Suggest things to do** on the Itinerary tab. The component authorizes the owner/editor role, sends only the destination and dates to Tavily Basic Search, then sends bounded trip context plus bounded Tavily snippets treated as untrusted data to Gemini 3.1 Flash-Lite for ungrounded generation. It returns temporary cards with validated, normalized HTTPS Tavily URLs allowlisted by matching Tavily title and URL as sources. Dismiss or clear cards, or edit a card's title, place, date, and optional time before scheduling it. Carol and Eve cannot generate or schedule suggestions. Only scheduled itinerary and activity records persist; unscheduled suggestions remain ephemeral browser state and are not shared.
 
